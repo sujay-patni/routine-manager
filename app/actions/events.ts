@@ -1,14 +1,20 @@
 "use server";
 
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import {
   getAllEvents,
+  getAllEventsIncludingCompleted,
   createEvent as notionCreateEvent,
   completeEvent as notionCompleteEvent,
+  updateEventProgress as notionUpdateEventProgress,
   deleteEvent as notionDeleteEvent,
   updateEvent as notionUpdateEvent,
 } from "@/lib/notion/events";
 import { getWeekBoundaries, formatDateForDB, getDeadlineState } from "@/lib/habit-logic";
+import { getSettings } from "@/app/actions/settings";
+import { parseISO } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
 import type { AppEvent } from "@/lib/notion/types";
 
 export interface TodayEvent extends AppEvent {
@@ -16,17 +22,18 @@ export interface TodayEvent extends AppEvent {
   isOverdue?: boolean;
 }
 
-function getSettings() {
-  return {
-    timezone: process.env.TIMEZONE ?? "Asia/Kolkata",
-    defaultSurfaceDays: Number(process.env.DEADLINE_SURFACE_DAYS ?? 3),
-  };
-}
+export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
+  const settings = await getSettings();
+  const { timezone, deadline_surface_days: defaultSurfaceDays } = settings;
 
-export async function getTodayEvents(): Promise<TodayEvent[]> {
-  const { timezone, defaultSurfaceDays } = getSettings();
-  const { today } = getWeekBoundaries(timezone);
-  const todayStr = formatDateForDB(today);
+  let targetDate: Date;
+  if (dateStr) {
+    targetDate = toZonedTime(parseISO(dateStr), timezone);
+  } else {
+    const { today } = getWeekBoundaries(timezone);
+    targetDate = today;
+  }
+  const todayStr = formatDateForDB(targetDate);
 
   const allEvents = await getAllEvents();
   const todayEvents: TodayEvent[] = [];
@@ -43,7 +50,8 @@ export async function getTodayEvents(): Promise<TodayEvent[]> {
       const { show, daysUntil, isOverdue } = getDeadlineState(
         event.due_date!,
         surfaceDays,
-        timezone
+        timezone,
+        targetDate
       );
       if (show) {
         todayEvents.push({ ...event, daysUntilDue: daysUntil, isOverdue });
@@ -58,6 +66,10 @@ export async function getUpcomingEvents(): Promise<AppEvent[]> {
   return getAllEvents();
 }
 
+export async function getAllEventsForCalendar(): Promise<AppEvent[]> {
+  return getAllEventsIncludingCompleted();
+}
+
 export async function createEvent(data: {
   title: string;
   description?: string;
@@ -68,11 +80,16 @@ export async function createEvent(data: {
   is_recurring?: boolean;
   recurrence_rule?: string;
   surface_days?: number;
+  time_of_day?: string;
+  due_time?: string;
+  progress_metric?: string;
+  progress_target?: number;
 }) {
   try {
     await notionCreateEvent(data);
     revalidatePath("/today");
     revalidatePath("/schedule");
+    revalidatePath("/calendar");
     return { success: true };
   } catch (e) {
     return { error: String(e) };
@@ -80,8 +97,20 @@ export async function createEvent(data: {
 }
 
 export async function completeEvent(id: string) {
-  try {
+  after(async () => {
     await notionCompleteEvent(id);
+    revalidatePath("/today");
+    revalidatePath("/schedule");
+  });
+  return { success: true };
+}
+
+export async function updateEventProgress(id: string, progressValue: number, autoComplete = false) {
+  try {
+    await notionUpdateEventProgress(id, progressValue);
+    if (autoComplete) {
+      await notionCompleteEvent(id);
+    }
     revalidatePath("/today");
     revalidatePath("/schedule");
     return { success: true };
@@ -95,6 +124,7 @@ export async function deleteEvent(id: string) {
     await notionDeleteEvent(id);
     revalidatePath("/today");
     revalidatePath("/schedule");
+    revalidatePath("/calendar");
     return { success: true };
   } catch (e) {
     return { error: String(e) };
@@ -113,6 +143,11 @@ export async function updateEvent(
     is_recurring: boolean;
     recurrence_rule: string | null;
     surface_days: number;
+    time_of_day: string | null;
+    due_time: string | null;
+    progress_metric: string | null;
+    progress_target: number | null;
+    progress_value: number | null;
   }>
 ) {
   try {

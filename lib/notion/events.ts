@@ -1,6 +1,6 @@
 import { notion, EVENTS_DB } from "./client";
 import { getText, getSelect, getCheckbox, getDate } from "./helpers";
-import type { AppEvent } from "./types";
+import type { AppEvent, TimeOfDay } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -18,6 +18,11 @@ function pageToEvent(page: any): AppEvent {
     recurrence_rule: getText(props["Recurrence Rule"]) || null,
     surface_days: props["Surface Days"]?.number ?? 3,
     is_completed: getCheckbox(props["Completed"]),
+    time_of_day: (getSelect(props["Time of Day"]) as TimeOfDay) || null,
+    due_time: getText(props["Due Time"]) || null,
+    progress_metric: getText(props["Progress Metric"]) || null,
+    progress_target: props["Progress Target"]?.number ?? null,
+    progress_value: props["Progress Value"]?.number ?? null,
   };
 }
 
@@ -38,6 +43,22 @@ export async function getAllEvents(): Promise<AppEvent[]> {
   return results.map(pageToEvent);
 }
 
+export async function getAllEventsIncludingCompleted(): Promise<AppEvent[]> {
+  const results: any[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const response = await notion.dataSources.query({
+      data_source_id: EVENTS_DB,
+      start_cursor: cursor,
+    });
+    results.push(...response.results);
+    cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+
+  return results.map(pageToEvent);
+}
+
 export async function createEvent(data: {
   title: string;
   description?: string;
@@ -48,6 +69,10 @@ export async function createEvent(data: {
   is_recurring?: boolean;
   recurrence_rule?: string;
   surface_days?: number;
+  time_of_day?: string;
+  due_time?: string;
+  progress_metric?: string;
+  progress_target?: number;
 }): Promise<AppEvent> {
   const props: Record<string, any> = {
     Title: { title: [{ text: { content: data.title } }] },
@@ -62,6 +87,10 @@ export async function createEvent(data: {
   if (data.end_time) props["End Time"] = { date: { start: data.end_time } };
   if (data.due_date) props["Due Date"] = { date: { start: data.due_date } };
   if (data.recurrence_rule) props["Recurrence Rule"] = { rich_text: [{ text: { content: data.recurrence_rule } }] };
+  if (data.time_of_day) props["Time of Day"] = { select: { name: data.time_of_day } };
+  if (data.due_time) props["Due Time"] = { rich_text: [{ text: { content: data.due_time } }] };
+  if (data.progress_metric) props["Progress Metric"] = { rich_text: [{ text: { content: data.progress_metric } }] };
+  if (data.progress_target != null) props["Progress Target"] = { number: data.progress_target };
 
   const page = await notion.pages.create({
     parent: { data_source_id: EVENTS_DB },
@@ -76,6 +105,14 @@ export async function completeEvent(id: string): Promise<void> {
     page_id: id,
     properties: { Completed: { checkbox: true } },
   });
+}
+
+export async function updateEventProgress(id: string, progressValue: number): Promise<void> {
+  const props: any = { "Progress Value": { number: progressValue } };
+  if (progressValue > 0) {
+    // Mark as complete if we need to - caller handles this logic
+  }
+  await notion.pages.update({ page_id: id, properties: props });
 }
 
 export async function deleteEvent(id: string): Promise<void> {
@@ -94,6 +131,11 @@ export async function updateEvent(
     is_recurring: boolean;
     recurrence_rule: string | null;
     surface_days: number;
+    time_of_day: string | null;
+    due_time: string | null;
+    progress_metric: string | null;
+    progress_target: number | null;
+    progress_value: number | null;
   }>
 ): Promise<void> {
   const props: Record<string, any> = {};
@@ -106,6 +148,11 @@ export async function updateEvent(
   if (data.is_recurring !== undefined) props["Recurring"] = { checkbox: data.is_recurring };
   if (data.recurrence_rule !== undefined) props["Recurrence Rule"] = { rich_text: data.recurrence_rule ? [{ text: { content: data.recurrence_rule } }] : [] };
   if (data.surface_days !== undefined) props["Surface Days"] = { number: data.surface_days };
+  if (data.time_of_day !== undefined) props["Time of Day"] = data.time_of_day ? { select: { name: data.time_of_day } } : { select: null };
+  if (data.due_time !== undefined) props["Due Time"] = { rich_text: data.due_time ? [{ text: { content: data.due_time } }] : [] };
+  if (data.progress_metric !== undefined) props["Progress Metric"] = { rich_text: data.progress_metric ? [{ text: { content: data.progress_metric } }] : [] };
+  if (data.progress_target !== undefined) props["Progress Target"] = { number: data.progress_target };
+  if (data.progress_value !== undefined) props["Progress Value"] = { number: data.progress_value };
 
   await notion.pages.update({ page_id: id, properties: props });
 }

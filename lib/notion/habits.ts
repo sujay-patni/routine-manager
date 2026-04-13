@@ -1,6 +1,6 @@
 import { notion, HABITS_DB, COMPLETIONS_DB } from "./client";
 import { getText, getSelect, getCheckbox, getDate, getRelationIds } from "./helpers";
-import type { Habit, Completion } from "./types";
+import type { Habit, Completion, HabitFrequency, TimeOfDay } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -10,12 +10,18 @@ function pageToHabit(page: any): Habit {
     id: page.id,
     name: getText(props["Name"]),
     description: getText(props["Description"]) || null,
-    frequency: (getSelect(props["Frequency"]) as "daily" | "weekly") || "daily",
+    frequency: (getSelect(props["Frequency"]) as HabitFrequency) || "daily",
     weekly_target: props["Weekly Target"]?.number ?? null,
-    color: getSelect(props["Color"]) || "indigo",
+    color: getSelect(props["Color"]) || "#6366f1",
     icon: getText(props["Icon"]) || "✅",
     is_active: getCheckbox(props["Active"]),
     created_at: page.created_time,
+    time_of_day: (getSelect(props["Time of Day"]) as TimeOfDay) || null,
+    exact_time: getText(props["Exact Time"]) || null,
+    specific_days: getText(props["Specific Days"]) || null,
+    progress_metric: getText(props["Progress Metric"]) || null,
+    progress_target: props["Progress Target"]?.number ?? null,
+    progress_start: props["Progress Start"]?.number ?? null,
   };
 }
 
@@ -26,6 +32,7 @@ function pageToCompletion(page: any): Completion {
     habit_id: getRelationIds(props["Habit"])[0] ?? "",
     date: getDate(props["Date"]),
     note: getText(props["Note"]) || null,
+    progress_value: props["Progress Value"]?.number ?? null,
   };
 }
 
@@ -37,6 +44,22 @@ export async function getAllHabits(): Promise<Habit[]> {
     const response = await notion.dataSources.query({
       data_source_id: HABITS_DB,
       filter: { property: "Active", checkbox: { equals: true } },
+      start_cursor: cursor,
+    });
+    results.push(...response.results);
+    cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+
+  return results.map(pageToHabit);
+}
+
+export async function getAllHabitsIncludingInactive(): Promise<Habit[]> {
+  const results: any[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const response = await notion.dataSources.query({
+      data_source_id: HABITS_DB,
       start_cursor: cursor,
     });
     results.push(...response.results);
@@ -71,18 +94,32 @@ export async function getCompletionsForWeek(
   return results.map(pageToCompletion);
 }
 
+export async function getCompletionsForDate(date: string): Promise<Completion[]> {
+  const response = await notion.dataSources.query({
+    data_source_id: COMPLETIONS_DB,
+    filter: { property: "Date", date: { equals: date } },
+  }) as any;
+  return response.results.map(pageToCompletion);
+}
+
 export async function createCompletion(
   habitId: string,
   date: string,
-  habitName: string
+  habitName: string,
+  progressValue?: number
 ): Promise<Completion> {
+  const props: any = {
+    Title: { title: [{ text: { content: `${habitName} – ${date}` } }] },
+    Habit: { relation: [{ id: habitId }] },
+    Date: { date: { start: date } },
+  };
+  if (progressValue !== undefined) {
+    props["Progress Value"] = { number: progressValue };
+  }
+
   const page = await notion.pages.create({
     parent: { data_source_id: COMPLETIONS_DB },
-    properties: {
-      Title: { title: [{ text: { content: `${habitName} – ${date}` } }] },
-      Habit: { relation: [{ id: habitId }] },
-      Date: { date: { start: date } },
-    },
+    properties: props,
   }) as any;
 
   return pageToCompletion(page);
@@ -90,6 +127,28 @@ export async function createCompletion(
 
 export async function deleteCompletion(completionId: string): Promise<void> {
   await notion.pages.update({ page_id: completionId, in_trash: true });
+}
+
+export async function findCompletion(habitId: string, date: string): Promise<Completion | null> {
+  const response = await notion.dataSources.query({
+    data_source_id: COMPLETIONS_DB,
+    filter: {
+      and: [
+        { property: "Habit", relation: { contains: habitId } },
+        { property: "Date", date: { equals: date } },
+      ],
+    },
+    page_size: 1,
+  }) as any;
+  const page = response.results[0];
+  return page ? pageToCompletion(page) : null;
+}
+
+export async function updateCompletionProgress(completionId: string, progressValue: number): Promise<void> {
+  await notion.pages.update({
+    page_id: completionId,
+    properties: { "Progress Value": { number: progressValue } },
+  });
 }
 
 export async function findAndDeleteCompletion(habitId: string, date: string): Promise<void> {
@@ -113,22 +172,37 @@ export async function findAndDeleteCompletion(habitId: string, date: string): Pr
 export async function createHabit(data: {
   name: string;
   description?: string;
-  frequency: "daily" | "weekly";
+  frequency: HabitFrequency;
   weekly_target?: number;
   color: string;
   icon: string;
+  time_of_day?: string;
+  exact_time?: string;
+  specific_days?: string;
+  progress_metric?: string;
+  progress_target?: number;
+  progress_start?: number;
 }): Promise<Habit> {
+  const props: any = {
+    Name: { title: [{ text: { content: data.name } }] },
+    Description: { rich_text: data.description ? [{ text: { content: data.description } }] : [] },
+    Frequency: { select: { name: data.frequency } },
+    "Weekly Target": data.weekly_target != null ? { number: data.weekly_target } : { number: null },
+    Color: { select: { name: data.color } },
+    Icon: { rich_text: [{ text: { content: data.icon } }] },
+    Active: { checkbox: true },
+  };
+
+  if (data.time_of_day) props["Time of Day"] = { select: { name: data.time_of_day } };
+  if (data.exact_time) props["Exact Time"] = { rich_text: [{ text: { content: data.exact_time } }] };
+  if (data.specific_days) props["Specific Days"] = { rich_text: [{ text: { content: data.specific_days } }] };
+  if (data.progress_metric) props["Progress Metric"] = { rich_text: [{ text: { content: data.progress_metric } }] };
+  if (data.progress_target != null) props["Progress Target"] = { number: data.progress_target };
+  if (data.progress_start != null) props["Progress Start"] = { number: data.progress_start };
+
   const page = await notion.pages.create({
     parent: { data_source_id: HABITS_DB },
-    properties: {
-      Name: { title: [{ text: { content: data.name } }] },
-      Description: { rich_text: data.description ? [{ text: { content: data.description } }] : [] },
-      Frequency: { select: { name: data.frequency } },
-      "Weekly Target": data.weekly_target != null ? { number: data.weekly_target } : { number: null },
-      Color: { select: { name: data.color } },
-      Icon: { rich_text: [{ text: { content: data.icon } }] },
-      Active: { checkbox: true },
-    },
+    properties: props,
   }) as any;
 
   return pageToHabit(page);
@@ -139,11 +213,17 @@ export async function updateHabit(
   data: Partial<{
     name: string;
     description: string;
-    frequency: "daily" | "weekly";
+    frequency: HabitFrequency;
     weekly_target: number | null;
     color: string;
     icon: string;
     is_active: boolean;
+    time_of_day: string | null;
+    exact_time: string | null;
+    specific_days: string | null;
+    progress_metric: string | null;
+    progress_target: number | null;
+    progress_start: number | null;
   }>
 ): Promise<void> {
   const props: Record<string, any> = {};
@@ -154,6 +234,12 @@ export async function updateHabit(
   if (data.color !== undefined) props["Color"] = { select: { name: data.color } };
   if (data.icon !== undefined) props["Icon"] = { rich_text: [{ text: { content: data.icon } }] };
   if (data.is_active !== undefined) props["Active"] = { checkbox: data.is_active };
+  if (data.time_of_day !== undefined) props["Time of Day"] = data.time_of_day ? { select: { name: data.time_of_day } } : { select: null };
+  if (data.exact_time !== undefined) props["Exact Time"] = { rich_text: data.exact_time ? [{ text: { content: data.exact_time } }] : [] };
+  if (data.specific_days !== undefined) props["Specific Days"] = { rich_text: data.specific_days ? [{ text: { content: data.specific_days } }] : [] };
+  if (data.progress_metric !== undefined) props["Progress Metric"] = { rich_text: data.progress_metric ? [{ text: { content: data.progress_metric } }] : [] };
+  if (data.progress_target !== undefined) props["Progress Target"] = { number: data.progress_target };
+  if (data.progress_start !== undefined) props["Progress Start"] = { number: data.progress_start };
 
   await notion.pages.update({ page_id: id, properties: props });
 }
