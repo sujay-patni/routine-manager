@@ -8,11 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { updateHabit, deleteHabit } from "@/app/actions/habits";
+import type { Habit } from "@/lib/notion/types";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 
 interface EditHabitSheetProps {
-  habit: ProcessedHabit | null;
+  habit: Habit | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dispatchHabit?: (action: OptimisticAction<ProcessedHabit>) => void;
@@ -36,7 +37,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   const [exactTime, setExactTime] = useState(habit?.exact_time ?? "");
 
   // Sync state when habit prop changes (sheet reopens with different habit)
-  function resetToHabit(h: ProcessedHabit | null) {
+  function resetToHabit(h: Habit | null) {
     setProgressOn(!!h?.progress_metric);
     setMetric(h?.progress_metric ?? "");
     setTarget(String(h?.progress_target ?? ""));
@@ -48,7 +49,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     setConfirmDelete(false);
   }
 
-  const [prevHabit, setPrevHabit] = useState(habit);
+  const [prevHabit, setPrevHabit] = useState<Habit | null>(habit);
   if (habit !== prevHabit) {
     setPrevHabit(habit);
     if (habit) resetToHabit(habit);
@@ -59,7 +60,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     if (!confirmDelete) { setConfirmDelete(true); return; }
     
     startTransition(async () => {
-      if (dispatchHabit) dispatchHabit({ action: "delete", item: habit });
+      if (dispatchHabit) dispatchHabit({ action: "delete", item: habit as ProcessedHabit });
       const result = await deleteHabit(habit.id);
       if (result.error) console.error("Error deleting habit:", result.error);
       else router.refresh();
@@ -76,13 +77,13 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
       progress_metric: progressOn ? metric || null : null,
       progress_target: progressOn && target ? Number(target) : null,
       progress_start: progressOn ? Number(start) : null,
-      time_of_day: showExact ? null : (timeOfDay as ProcessedHabit["time_of_day"]) || null,
+      time_of_day: showExact ? null : (timeOfDay as Habit["time_of_day"]) || null,
       exact_time: showExact ? exactTime || null : null,
     };
     
     startTransition(async () => {
       if (dispatchHabit) {
-        dispatchHabit({ action: "update", item: { ...habit, ...payload } as ProcessedHabit });
+        dispatchHabit({ action: "update", item: { ...(habit as ProcessedHabit), ...payload } });
       }
       const result = await updateHabit(habit.id, payload);
       if (result.error) console.error("Error updating habit:", result.error);
