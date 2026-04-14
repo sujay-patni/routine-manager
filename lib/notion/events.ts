@@ -20,10 +20,24 @@ function pageToEvent(page: any): AppEvent {
     is_completed: getCheckbox(props["Completed"]),
     time_of_day: (getSelect(props["Time of Day"]) as TimeOfDay) || null,
     due_time: getText(props["Due Time"]) || null,
-    progress_metric: getText(props["Progress Metric"]) || null,
-    progress_target: props["Progress Target"]?.number ?? null,
-    progress_value: props["Progress Value"]?.number ?? null,
   };
+}
+
+async function queryWithBackoff(params: any): Promise<any> {
+  let retries = 3;
+  let delay = 1000;
+  while (true) {
+    try {
+      return await notion.dataSources.query({ ...params, page_size: params.page_size || 50 });
+    } catch (e: any) {
+      if (retries <= 0 || (e.status !== 503 && e.status !== 502 && !e.message?.includes("temporarily unavailable"))) {
+        throw e;
+      }
+      await new Promise((res) => setTimeout(res, delay));
+      delay *= 2;
+      retries--;
+    }
+  }
 }
 
 export async function getAllEvents(): Promise<AppEvent[]> {
@@ -31,7 +45,7 @@ export async function getAllEvents(): Promise<AppEvent[]> {
   let cursor: string | undefined;
 
   do {
-    const response = await notion.dataSources.query({
+    const response = await queryWithBackoff({
       data_source_id: EVENTS_DB,
       filter: { property: "Completed", checkbox: { equals: false } },
       start_cursor: cursor,
@@ -48,7 +62,7 @@ export async function getAllEventsIncludingCompleted(): Promise<AppEvent[]> {
   let cursor: string | undefined;
 
   do {
-    const response = await notion.dataSources.query({
+    const response = await queryWithBackoff({
       data_source_id: EVENTS_DB,
       start_cursor: cursor,
     });
@@ -71,8 +85,6 @@ export async function createEvent(data: {
   surface_days?: number;
   time_of_day?: string;
   due_time?: string;
-  progress_metric?: string;
-  progress_target?: number;
 }): Promise<AppEvent> {
   const props: Record<string, any> = {
     Title: { title: [{ text: { content: data.title } }] },
@@ -89,8 +101,6 @@ export async function createEvent(data: {
   if (data.recurrence_rule) props["Recurrence Rule"] = { rich_text: [{ text: { content: data.recurrence_rule } }] };
   if (data.time_of_day) props["Time of Day"] = { select: { name: data.time_of_day } };
   if (data.due_time) props["Due Time"] = { rich_text: [{ text: { content: data.due_time } }] };
-  if (data.progress_metric) props["Progress Metric"] = { rich_text: [{ text: { content: data.progress_metric } }] };
-  if (data.progress_target != null) props["Progress Target"] = { number: data.progress_target };
 
   const page = await notion.pages.create({
     parent: { data_source_id: EVENTS_DB },
@@ -107,16 +117,42 @@ export async function completeEvent(id: string): Promise<void> {
   });
 }
 
-export async function updateEventProgress(id: string, progressValue: number): Promise<void> {
-  const props: any = { "Progress Value": { number: progressValue } };
-  if (progressValue > 0) {
-    // Mark as complete if we need to - caller handles this logic
-  }
-  await notion.pages.update({ page_id: id, properties: props });
+export async function setEventCompleted(id: string, isCompleted: boolean): Promise<void> {
+  await notion.pages.update({
+    page_id: id,
+    properties: { Completed: { checkbox: isCompleted } },
+  });
 }
 
-export async function deleteEvent(id: string): Promise<void> {
-  await notion.pages.update({ page_id: id, in_trash: true });
+export async function deleteEvent(id: string, excludeDate?: string): Promise<void> {
+  const [baseId] = id.split("_");
+
+  if (excludeDate) {
+    const page = await notion.pages.retrieve({ page_id: baseId });
+    // @ts-expect-error - Notion typing is incomplete
+    const currentRRule = page.properties["Recurrence Rule"]?.rich_text?.[0]?.plain_text || "";
+    
+    if (currentRRule) {
+      // EXDATE expects YYYYMMDD format without hyphens
+      const cleanDate = excludeDate.replace(/-/g, "");
+      const newExdate = `${cleanDate}T120000Z`;
+
+      let newRRule = currentRRule;
+      if (currentRRule.includes("EXDATE:")) {
+        newRRule = currentRRule.replace(/EXDATE:(.*)/, `EXDATE:$1,${newExdate}`);
+      } else {
+        newRRule = `${currentRRule}\nEXDATE:${newExdate}`;
+      }
+      
+      await notion.pages.update({
+        page_id: baseId,
+        properties: { "Recurrence Rule": { rich_text: [{ text: { content: newRRule } }] } }
+      });
+      return; // Return early, leaving the parent intact
+    }
+  }
+
+  await notion.pages.update({ page_id: baseId, in_trash: true });
 }
 
 export async function updateEvent(
@@ -133,11 +169,9 @@ export async function updateEvent(
     surface_days: number;
     time_of_day: string | null;
     due_time: string | null;
-    progress_metric: string | null;
-    progress_target: number | null;
-    progress_value: number | null;
   }>
 ): Promise<void> {
+  const [baseId] = id.split("_");
   const props: Record<string, any> = {};
   if (data.title !== undefined) props["Title"] = { title: [{ text: { content: data.title } }] };
   if (data.description !== undefined) props["Description"] = { rich_text: [{ text: { content: data.description } }] };
@@ -150,9 +184,6 @@ export async function updateEvent(
   if (data.surface_days !== undefined) props["Surface Days"] = { number: data.surface_days };
   if (data.time_of_day !== undefined) props["Time of Day"] = data.time_of_day ? { select: { name: data.time_of_day } } : { select: null };
   if (data.due_time !== undefined) props["Due Time"] = { rich_text: data.due_time ? [{ text: { content: data.due_time } }] : [] };
-  if (data.progress_metric !== undefined) props["Progress Metric"] = { rich_text: data.progress_metric ? [{ text: { content: data.progress_metric } }] : [] };
-  if (data.progress_target !== undefined) props["Progress Target"] = { number: data.progress_target };
-  if (data.progress_value !== undefined) props["Progress Value"] = { number: data.progress_value };
 
   await notion.pages.update({ page_id: id, properties: props });
 }

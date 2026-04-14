@@ -7,8 +7,6 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/today", label: "Today", icon: "☀️" },
   { href: "/calendar", label: "Calendar", icon: "📆" },
-  { href: "/schedule", label: "Schedule", icon: "📅" },
-  { href: "/weekly", label: "Weekly", icon: "📊" },
   { href: "/settings", label: "Settings", icon: "⚙️" },
 ];
 

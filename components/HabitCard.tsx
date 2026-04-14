@@ -1,15 +1,20 @@
 "use client";
 
-import { useOptimistic, useTransition, useState } from "react";
+import { useTransition, useState } from "react";
+import { useRouter } from "next/navigation";
 import { completeHabit, uncompleteHabit, logHabitProgress } from "@/app/actions/habits";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import { Badge } from "@/components/ui/badge";
-import ProgressInput from "@/components/ProgressInput";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { useRef } from "react";
 
 interface HabitCardProps {
   habit: ProcessedHabit;
   today: string;
+  onDoneChange?: (id: string, done: boolean) => void;
+  onToggle?: (id: string, done: boolean, serverFn: () => Promise<any>) => void;
+  onEdit?: () => void;
 }
 
 const TIME_OF_DAY_LABEL: Record<string, string> = {
@@ -22,48 +27,88 @@ const TIME_OF_DAY_LABEL: Record<string, string> = {
 const stateConfig = {
   done: { badge: null, cardClass: "opacity-65", checkClass: "bg-emerald-500 border-emerald-500" },
   pending: { badge: null, cardClass: "", checkClass: "" },
-  urgent: { badge: { label: "do today", className: "bg-orange-500 text-white" }, cardClass: "border-orange-200 dark:border-orange-900", checkClass: "" },
-  at_risk: { badge: { label: "at risk", className: "bg-destructive text-destructive-foreground" }, cardClass: "border-red-200 dark:border-red-900", checkClass: "" },
+  urgent: { badge: null, cardClass: "border-orange-200 dark:border-orange-900", checkClass: "" },
   optional: { badge: { label: "optional", className: "" }, cardClass: "opacity-75", checkClass: "" },
   satisfied: { badge: { label: "week done ✓", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300" }, cardClass: "opacity-65", checkClass: "" },
 };
 
-export default function HabitCard({ habit, today }: HabitCardProps) {
+export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit }: HabitCardProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [optimisticDone, setOptimisticDone] = useOptimistic(habit.completed_today > 0);
-  const [optimisticProgress, setOptimisticProgress] = useOptimistic(habit.today_progress ?? 0);
+  const [localDone, setLocalDone] = useState(habit.completed_today > 0);
+  const [localProgress, setLocalProgress] = useState(habit.today_progress ?? 0);
+  const [progressEditing, setProgressEditing] = useState(false);
+  const [inputVal, setInputVal] = useState(String(habit.today_progress ?? 0));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state cleanly if the date we are viewing changes without a remount or server returns updated progress data
+  const [prevTodayStr, setPrevTodayStr] = useState(today);
+  const [prevBaseCount, setPrevBaseCount] = useState(habit.completed_today);
+  if (today !== prevTodayStr || habit.completed_today !== prevBaseCount) {
+    setPrevTodayStr(today);
+    setPrevBaseCount(habit.completed_today);
+    setLocalDone(habit.completed_today > 0);
+    setLocalProgress(habit.today_progress ?? 0);
+    setInputVal(String(habit.today_progress ?? 0));
+  }
 
   const hasProgress = habit.progress_metric != null && habit.progress_target != null;
 
   function toggle() {
-    if (hasProgress) return; // Progress habits use ProgressInput
+    if (hasProgress) return;
+    const newDone = !localDone;
+    setLocalDone(newDone);
+    onDoneChange?.(habit.id, newDone);
+    const serverFn = async () => {
+      if (newDone) await completeHabit(habit.id, today, habit.name);
+      else await uncompleteHabit(habit.id, today);
+    };
+    if (onToggle) {
+      // Delegate to parent so dispatch + server call run in one transition
+      onToggle(habit.id, newDone, serverFn);
+    } else {
+      startTransition(serverFn);
+    }
+  }
+
+  function openProgressEditor(e: React.MouseEvent) {
+    e.stopPropagation();
+    setInputVal(String(localProgress));
+    setProgressEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }
+
+  function submitProgress(e?: React.FormEvent) {
+    e?.preventDefault();
+    e?.stopPropagation();
+    const raw = Math.max(
+      habit.progress_start ?? 0,
+      Math.min((habit.progress_target ?? 0) * 2, Number(inputVal) || 0)
+    );
+    const val = Math.round(raw * 100) / 100;
+    const prevProgress = localProgress;
+    setLocalProgress(val);
+    setProgressEditing(false);
+    const nowDone = habit.progress_target != null && val >= habit.progress_target;
+    onDoneChange?.(habit.id, nowDone);
     startTransition(async () => {
-      setOptimisticDone(!optimisticDone);
-      if (optimisticDone) {
-        await uncompleteHabit(habit.id, today);
-      } else {
-        await completeHabit(habit.id, today, habit.name);
+      const result = await logHabitProgress(habit.id, today, habit.name, val);
+      if (result?.error) {
+        setLocalProgress(prevProgress);
+        onDoneChange?.(habit.id, habit.progress_target != null && prevProgress >= habit.progress_target);
       }
     });
   }
 
-  function handleProgressUpdate(value: number) {
-    startTransition(async () => {
-      setOptimisticProgress(value);
-      await logHabitProgress(habit.id, today, habit.name, value);
-    });
-  }
-
   const config = stateConfig[habit.state];
-  const isProgressDone = hasProgress && optimisticProgress >= (habit.progress_target ?? 0);
-  const effectiveDone = hasProgress ? isProgressDone : optimisticDone;
+  const isProgressDone = hasProgress && localProgress >= (habit.progress_target ?? 0);
+  const effectiveDone = hasProgress ? isProgressDone : localDone;
 
   const weeklyProgress =
     habit.frequency === "weekly" || habit.frequency === "specific_days_weekly"
       ? `${habit.completions_this_week}/${habit.target}`
       : null;
 
-  // Time label to show
   const timeLabel = habit.exact_time
     ? (() => {
         const [h, m] = habit.exact_time.split(":").map(Number);
@@ -75,6 +120,11 @@ export default function HabitCard({ habit, today }: HabitCardProps) {
     ? TIME_OF_DAY_LABEL[habit.time_of_day]
     : null;
 
+  const progressRange = (habit.progress_target ?? 0) - (habit.progress_start ?? 0);
+  const progressPct = progressRange > 0
+    ? Math.min(100, ((localProgress - (habit.progress_start ?? 0)) / progressRange) * 100)
+    : 0;
+
   return (
     <div
       className={cn(
@@ -85,7 +135,7 @@ export default function HabitCard({ habit, today }: HabitCardProps) {
       style={{ borderLeftWidth: "4px", borderLeftColor: habit.color }}
     >
       <div className="flex items-center gap-3">
-        {/* Circle checkbox (only for non-progress habits) */}
+        {/* Circle checkbox (non-progress habits only) */}
         {!hasProgress && (
           <button
             onClick={toggle}
@@ -103,22 +153,6 @@ export default function HabitCard({ habit, today }: HabitCardProps) {
               </svg>
             )}
           </button>
-        )}
-
-        {/* Progress circle indicator */}
-        {hasProgress && (
-          <div
-            className={cn(
-              "w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
-              isProgressDone ? "bg-emerald-500 border-emerald-500" : "border-primary/40"
-            )}
-          >
-            {isProgressDone && (
-              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-          </div>
         )}
 
         {/* Icon + name */}
@@ -143,19 +177,101 @@ export default function HabitCard({ habit, today }: HabitCardProps) {
             {config.badge.label}
           </Badge>
         )}
+
+        {/* Edit button */}
+        {onEdit && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted transition-colors flex-shrink-0"
+            aria-label="Edit habit"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+        )}
+
+        {/* Progress "+" button */}
+        {hasProgress && !isProgressDone && (
+          <button
+            onClick={openProgressEditor}
+            disabled={isPending}
+            className="w-7 h-7 rounded-full border-2 border-primary/40 flex items-center justify-center flex-shrink-0 text-primary hover:bg-primary/10 active:scale-90 transition-all"
+            aria-label="Log progress"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        )}
+
+        {/* Progress done checkmark */}
+        {hasProgress && isProgressDone && (
+          <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        )}
       </div>
 
-      {/* Progress bar (for progress-tracked habits) */}
+      {/* Progress bar */}
       {hasProgress && (
-        <ProgressInput
-          metric={habit.progress_metric!}
-          target={habit.progress_target!}
-          start={habit.progress_start ?? 0}
-          current={optimisticProgress}
-          onUpdate={handleProgressUpdate}
-          disabled={isPending}
-          className="pl-9"
-        />
+        <div className="mt-2 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {localProgress} / {habit.progress_target} {habit.progress_metric}
+            </span>
+            {isProgressDone && (
+              <span className="text-xs text-emerald-600 font-medium">Done ✓</span>
+            )}
+          </div>
+          <Progress
+            value={progressPct}
+            className={cn("h-1.5", isProgressDone && "[&>div]:bg-emerald-500")}
+          />
+        </div>
+      )}
+
+      {/* Inline progress editor */}
+      {progressEditing && (
+        <form
+          onSubmit={submitProgress}
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-2 mt-2 pt-2 border-t border-border/50"
+        >
+          <input
+            ref={inputRef}
+            type="number"
+            value={inputVal}
+            onChange={(e) => setInputVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setProgressEditing(false); }}
+            step="0.01"
+            min={habit.progress_start ?? 0}
+            className="w-24 text-sm border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <span className="text-xs text-muted-foreground flex-1">/ {habit.progress_target} {habit.progress_metric}</span>
+          <button
+            type="button"
+            onClick={() => setProgressEditing(false)}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors flex-shrink-0"
+            aria-label="Cancel"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <button
+            type="submit"
+            className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all flex-shrink-0"
+            aria-label="Save progress"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+        </form>
       )}
     </div>
   );

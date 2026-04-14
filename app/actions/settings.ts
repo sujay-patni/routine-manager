@@ -1,7 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { cache } from "react";
+import { revalidatePath, unstable_cache } from "next/cache";
 import {
   getAppSettings,
   createAppSettings,
@@ -11,7 +10,6 @@ import type { AppSettings } from "@/lib/notion/types";
 
 export type { AppSettings };
 
-// Env-var fallback (used when Notion Settings DB is not configured)
 function getEnvSettings(): AppSettings {
   return {
     id: "env",
@@ -21,11 +19,20 @@ function getEnvSettings(): AppSettings {
   };
 }
 
-// Cached per-request to avoid multiple Notion fetches
-export const getSettings = cache(async (): Promise<AppSettings> => {
-  const notionSettings = await getAppSettings();
-  return notionSettings ?? getEnvSettings();
-});
+// Cached for 5 minutes to avoid a Notion API call on every page render.
+// Invalidated immediately when saveSettings() writes a new value.
+const getCachedSettings = unstable_cache(
+  async (): Promise<AppSettings> => {
+    const notionSettings = await getAppSettings();
+    return notionSettings ?? getEnvSettings();
+  },
+  ["app-settings"],
+  { revalidate: 300 }
+);
+
+export async function getSettings(): Promise<AppSettings> {
+  return getCachedSettings();
+}
 
 export async function saveSettings(data: {
   timezone: string;
@@ -39,6 +46,8 @@ export async function saveSettings(data: {
     } else {
       await createAppSettings(data);
     }
+    // Bust the settings cache so the new values take effect immediately
+    revalidatePath("/", "layout");
     revalidatePath("/settings");
     revalidatePath("/today");
     return { success: true };

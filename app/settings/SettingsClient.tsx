@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { updateHabit, getAllHabits } from "@/app/actions/habits";
 import { saveSettings } from "@/app/actions/settings";
 import AddItemSheet from "@/components/AddItemSheet";
+import EditHabitSheet from "@/components/EditHabitSheet";
 import type { Habit } from "@/lib/notion/types";
 import type { AppSettings } from "@/app/actions/settings";
 
@@ -46,6 +47,7 @@ interface Props {
 export default function SettingsClient({ settings, habits: initialHabits, notionHabitsUrl, notionEventsUrl }: Props) {
   const router = useRouter();
   const [addHabitOpen, setAddHabitOpen] = useState(false);
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [habits, setHabits] = useState(initialHabits);
 
   // Settings form state
@@ -89,12 +91,12 @@ export default function SettingsClient({ settings, habits: initialHabits, notion
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b px-4 py-3">
-        <div className="max-w-2xl mx-auto lg:max-w-none">
+        <div className="max-w-2xl mx-auto">
           <h1 className="text-lg font-bold">Settings</h1>
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full lg:max-w-none space-y-8">
+      <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-8">
 
         {/* ─── Preferences ─── */}
         <section className="space-y-4">
@@ -193,6 +195,14 @@ export default function SettingsClient({ settings, habits: initialHabits, notion
                 </div>
                 <Button
                   size="sm"
+                  variant="ghost"
+                  onClick={() => setEditingHabit(habit)}
+                  className="text-xs"
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
                   variant={habit.is_active ? "outline" : "secondary"}
                   onClick={() => toggleHabitActive(habit)}
                   className="text-xs"
@@ -252,6 +262,11 @@ export default function SettingsClient({ settings, habits: initialHabits, notion
           if (!o) handleHabitAdded();
         }}
         defaultTab="habit"
+      />
+      <EditHabitSheet
+        habit={editingHabit}
+        open={!!editingHabit}
+        onOpenChange={(o) => { if (!o) setEditingHabit(null); }}
       />
     </div>
   );

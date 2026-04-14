@@ -10,5 +10,11 @@ export default async function CalendarPage() {
     getSettings(),
   ]);
 
-  return <CalendarClient events={events} weekStartDay={settings.week_start_day} />;
+  return (
+    <CalendarClient
+      events={events}
+      weekStartDay={settings.week_start_day}
+      timezone={settings.timezone}
+    />
+  );
 }

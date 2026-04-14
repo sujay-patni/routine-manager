@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,6 +13,9 @@ import { createHabit } from "@/app/actions/habits";
 import { createEvent } from "@/app/actions/events";
 import type { HabitFrequency } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
+import type { OptimisticAction } from "@/app/today/TodayClient";
+import type { ProcessedHabit } from "@/lib/habit-logic";
+import type { TodayEvent } from "@/app/actions/events";
 
 const COLORS = [
   "#6366f1", "#f43f5e", "#10b981", "#f59e0b", "#3b82f6",
@@ -31,21 +34,59 @@ const DAYS_OF_WEEK = [
   { abbr: "SU", label: "Sun" },
 ];
 
-const MONTHS = [
-  "Jan","Feb","Mar","Apr","May","Jun",
-  "Jul","Aug","Sep","Oct","Nov","Dec",
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
 ];
+
+const FREQ_LABELS: Record<HabitFrequency, string> = {
+  daily: "Daily",
+  weekly: "Weekly (with target)",
+  specific_days_weekly: "Specific days (weekly)",
+  specific_dates_monthly: "Specific dates (monthly)",
+  specific_dates_yearly: "Specific date (yearly)",
+};
+
+const RECURRENCE_LABELS: Record<string, string> = {
+  none: "No repeat",
+  daily: "Daily",
+  weekly: "Weekly",
+  weekdays: "Weekdays only",
+  specific_days: "Specific days (weekly)",
+  monthly: "Monthly",
+  yearly: "Yearly",
+};
+
+const SURFACE_LABELS: Record<string, string> = {
+  "1": "1 day before",
+  "2": "2 days before",
+  "3": "3 days before",
+  "5": "5 days before",
+  "7": "1 week before",
+  "14": "2 weeks before",
+  "30": "1 month before",
+};
 
 interface AddItemSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultTab?: "habit" | "timed" | "all_day" | "deadline";
+  defaultDate?: string; // YYYY-MM-DD — pre-fills date fields
+  dispatchHabit?: (action: OptimisticAction<ProcessedHabit>) => void;
+  dispatchEvent?: (action: OptimisticAction<TodayEvent>) => void;
 }
 
-export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" }: AddItemSheetProps) {
+// toISOString() is always UTC — use Intl.DateTimeFormat to get the
+// browser-local date so users east of UTC don't get yesterday's date.
+function todayISO() {
+  return new Intl.DateTimeFormat("en-CA").format(new Date()); // "en-CA" gives YYYY-MM-DD
+}
+
+export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit", defaultDate, dispatchHabit, dispatchEvent }: AddItemSheetProps) {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   // — Habit state —
   const [habitName, setHabitName] = useState("");
@@ -57,10 +98,12 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" 
   const [habitTimeOfDay, setHabitTimeOfDay] = useState("");
   const [habitExactTime, setHabitExactTime] = useState("");
   const [habitShowExact, setHabitShowExact] = useState(false);
-  const [habitDays, setHabitDays] = useState<string[]>([]);       // specific_days_weekly
-  const [habitDates, setHabitDates] = useState<string[]>([]);     // specific_dates_monthly
-  const [habitYearlyMonth, setHabitYearlyMonth] = useState("01");
-  const [habitYearlyDate, setHabitYearlyDate] = useState("01");
+  const [habitDays, setHabitDays] = useState<string[]>([]);
+  const [habitDates, setHabitDates] = useState<string[]>([]);
+  // yearly: multiple MM-DD entries
+  const [habitYearlyDates, setHabitYearlyDates] = useState<Array<{ month: string; day: string }>>([
+    { month: "01", day: "01" },
+  ]);
   const [habitProgressOn, setHabitProgressOn] = useState(false);
   const [habitMetric, setHabitMetric] = useState("");
   const [habitTarget2, setHabitTarget2] = useState("");
@@ -69,21 +112,28 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" 
   // — Event/Task/Deadline state —
   const [eventTitle, setEventTitle] = useState("");
   const [eventDesc, setEventDesc] = useState("");
-  const [eventDate, setEventDate] = useState(todayISO());
+  const [eventDate, setEventDate] = useState(todayISO);
   const [eventTime, setEventTime] = useState("09:00");
   const [eventEndTime, setEventEndTime] = useState("");
-  const [dueDate, setDueDate] = useState(todayISO());
+  const [dueDate, setDueDate] = useState(todayISO);
   const [dueTime, setDueTime] = useState("");
   const [surfaceDays, setSurfaceDays] = useState(3);
   const [recurrence, setRecurrence] = useState("none");
+  const [eventDays, setEventDays] = useState<string[]>([]);
   const [eventTimeOfDay, setEventTimeOfDay] = useState("");
   const [eventShowExact, setEventShowExact] = useState(false);
-  const [eventProgressOn, setEventProgressOn] = useState(false);
-  const [eventMetric, setEventMetric] = useState("");
-  const [eventTarget, setEventTarget] = useState("");
 
-  function todayISO() {
-    return new Date().toISOString().split("T")[0];
+  function baseDate() {
+    return defaultDate ?? todayISO();
+  }
+
+  const [prevDefaultDate, setPrevDefaultDate] = useState(defaultDate);
+  if (defaultDate !== prevDefaultDate) {
+    setPrevDefaultDate(defaultDate);
+    if (defaultDate) {
+      setEventDate(defaultDate);
+      setDueDate(defaultDate);
+    }
   }
 
   function resetForms() {
@@ -91,24 +141,32 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" 
     setHabitColor(COLORS[0]); setHabitIcon(ICONS[0]);
     setHabitTimeOfDay(""); setHabitExactTime(""); setHabitShowExact(false);
     setHabitDays([]); setHabitDates([]);
-    setHabitYearlyMonth("01"); setHabitYearlyDate("01");
+    setHabitYearlyDates([{ month: "01", day: "01" }]);
     setHabitProgressOn(false); setHabitMetric(""); setHabitTarget2(""); setHabitStart("0");
-    setEventTitle(""); setEventDesc(""); setEventDate(todayISO()); setEventTime("09:00");
-    setEventEndTime(""); setDueDate(todayISO()); setDueTime("");
-    setSurfaceDays(3); setRecurrence("none");
+    setEventTitle(""); setEventDesc(""); setEventDate(baseDate()); setEventTime("09:00");
+    setEventEndTime(""); setDueDate(baseDate()); setDueTime("");
+    setSurfaceDays(3); setRecurrence("none"); setEventDays([]);
     setEventTimeOfDay(""); setEventShowExact(false);
-    setEventProgressOn(false); setEventMetric(""); setEventTarget("");
     setError(null);
+    setWarning(null);
   }
 
-  function buildRRule(r: string): string | undefined {
+  function buildRRule(r: string, days?: string[]): string | undefined {
     if (r === "none") return undefined;
     if (r === "daily") return "FREQ=DAILY";
     if (r === "weekly") return "FREQ=WEEKLY";
     if (r === "weekdays") return "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR";
+    if (r === "specific_days") {
+      const byday = (days ?? []).join(",");
+      return byday ? `FREQ=WEEKLY;BYDAY=${byday}` : "FREQ=WEEKLY";
+    }
     if (r === "monthly") return "FREQ=MONTHLY";
     if (r === "yearly") return "FREQ=YEARLY";
     return undefined;
+  }
+
+  function toggleEventDay(abbr: string) {
+    setEventDays(prev => prev.includes(abbr) ? prev.filter(d => d !== abbr) : [...prev, abbr]);
   }
 
   function toggleDay(abbr: string) {
@@ -123,6 +181,20 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" 
     );
   }
 
+  function addYearlyDate() {
+    setHabitYearlyDates((prev) => [...prev, { month: "01", day: "01" }]);
+  }
+
+  function removeYearlyDate(idx: number) {
+    setHabitYearlyDates((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateYearlyDate(idx: number, field: "month" | "day", value: string) {
+    setHabitYearlyDates((prev) =>
+      prev.map((entry, i) => (i === idx ? { ...entry, [field]: value } : entry))
+    );
+  }
+
   function getHabitSpecificDays(): string | undefined {
     if (habitFreq === "specific_days_weekly" && habitDays.length > 0) {
       return habitDays.join(",");
@@ -130,21 +202,23 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" 
     if (habitFreq === "specific_dates_monthly" && habitDates.length > 0) {
       return habitDates.join(",");
     }
-    if (habitFreq === "specific_dates_yearly") {
-      return `${habitYearlyMonth}-${habitYearlyDate.padStart(2, "0")}`;
+    if (habitFreq === "specific_dates_yearly" && habitYearlyDates.length > 0) {
+      return habitYearlyDates
+        .map(({ month, day }) => `${month}-${String(day).padStart(2, "0")}`)
+        .join(",");
     }
     return undefined;
   }
 
-  async function handleHabitSubmit(e: React.FormEvent) {
+  function handleHabitSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!habitName.trim()) return;
-    setLoading(true); setError(null);
-    const result = await createHabit({
+    setError(null);
+    const payload = {
       name: habitName.trim(),
       description: habitDesc || undefined,
       frequency: habitFreq,
-      weekly_target: habitFreq === "weekly" ? habitTarget : undefined,
+      weekly_target: habitFreq === "weekly" && !habitProgressOn ? habitTarget : undefined,
       color: habitColor,
       icon: habitIcon,
       time_of_day: habitShowExact ? undefined : habitTimeOfDay || undefined,
@@ -153,478 +227,613 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit" 
       progress_metric: habitProgressOn ? habitMetric || undefined : undefined,
       progress_target: habitProgressOn && habitTarget2 ? Number(habitTarget2) : undefined,
       progress_start: habitProgressOn ? Number(habitStart) : undefined,
+    };
+    
+    startTransition(async () => {
+      if (dispatchHabit) {
+        dispatchHabit({
+          action: "add",
+          item: {
+            ...payload,
+            id: "temp-habit-" + Date.now(),
+            created_at: new Date().toISOString(),
+            is_active: true,
+            completed_today: 0,
+            completions_this_week: 0,
+            target: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
+            remaining: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
+            daysLeftInWeek: 7,
+            state: "pending",
+            show: true
+          } as ProcessedHabit
+        });
+      }
+      const result = await createHabit(payload);
+      if (result.error) console.error("Error creating habit:", result.error);
     });
-    setLoading(false);
-    if (result.error) { setError(result.error); return; }
-    resetForms(); onOpenChange(false); router.refresh();
+
+    resetForms();
+    onOpenChange(false);
   }
 
-  async function handleTimedEventSubmit(e: React.FormEvent) {
+  function handleTimedEventSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
-    setLoading(true); setError(null);
-    const startISO = `${eventDate}T${eventTime}:00`;
-    const endISO = eventEndTime ? `${eventDate}T${eventEndTime}:00` : undefined;
-    const rrule = buildRRule(recurrence);
-    const result = await createEvent({
+    setError(null);
+    const startISO = new Date(`${eventDate}T${eventTime}:00`).toISOString();
+    const endISO = eventEndTime ? new Date(`${eventDate}T${eventEndTime}:00`).toISOString() : undefined;
+    const rrule = buildRRule(recurrence, eventDays);
+    const payload = {
       title: eventTitle.trim(),
       description: eventDesc || undefined,
-      event_type: "timed",
+      event_type: "timed" as const,
       start_time: startISO,
       end_time: endISO,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
-      progress_metric: eventProgressOn ? eventMetric || undefined : undefined,
-      progress_target: eventProgressOn && eventTarget ? Number(eventTarget) : undefined,
+    };
+
+    startTransition(async () => {
+      if (dispatchEvent) {
+        dispatchEvent({
+          action: "add",
+          item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
+        });
+      }
+      const result = await createEvent(payload);
+      if (result.error) console.error("Error creating bounded event:", result.error);
     });
-    setLoading(false);
-    if (result.error) { setError(result.error); return; }
-    resetForms(); onOpenChange(false); router.refresh();
+
+    resetForms();
+    onOpenChange(false);
   }
 
-  async function handleAllDaySubmit(e: React.FormEvent) {
+  function handleAllDaySubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
-    setLoading(true); setError(null);
-    const result = await createEvent({
+    setError(null);
+    const rrule = buildRRule(recurrence, eventDays);
+    const payload = {
       title: eventTitle.trim(),
       description: eventDesc || undefined,
-      event_type: "all_day",
+      event_type: "all_day" as const,
       due_date: dueDate,
-      time_of_day: !eventShowExact ? eventTimeOfDay || undefined : undefined,
-      due_time: eventShowExact ? dueTime || undefined : undefined,
       is_recurring: recurrence !== "none",
-      recurrence_rule: buildRRule(recurrence),
-      progress_metric: eventProgressOn ? eventMetric || undefined : undefined,
-      progress_target: eventProgressOn && eventTarget ? Number(eventTarget) : undefined,
+      recurrence_rule: rrule,
+    };
+
+    startTransition(async () => {
+      if (dispatchEvent) {
+        dispatchEvent({
+          action: "add",
+          item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
+        });
+      }
+      const result = await createEvent(payload);
+      if (result.error) console.error("Error creating all-day event:", result.error);
     });
-    setLoading(false);
-    if (result.error) { setError(result.error); return; }
-    resetForms(); onOpenChange(false); router.refresh();
+
+    resetForms();
+    onOpenChange(false);
   }
 
-  async function handleDeadlineSubmit(e: React.FormEvent) {
+  function handleDeadlineSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
-    setLoading(true); setError(null);
-    const result = await createEvent({
+    setError(null);
+    
+    const payload = {
       title: eventTitle.trim(),
       description: eventDesc || undefined,
-      event_type: "deadline",
+      event_type: "deadline" as const,
       due_date: dueDate,
       due_time: dueTime || undefined,
-      surface_days: surfaceDays,
-      is_recurring: recurrence !== "none",
-      recurrence_rule: buildRRule(recurrence),
+      surface_days: Number(surfaceDays),
+    };
+
+    startTransition(async () => {
+      if (dispatchEvent) {
+        dispatchEvent({
+          action: "add",
+          item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
+        });
+      }
+      const result = await createEvent(payload);
+      if (result.error) console.error("Error creating deadline:", result.error);
     });
-    setLoading(false);
-    if (result.error) { setError(result.error); return; }
-    resetForms(); onOpenChange(false); router.refresh();
+
+    resetForms();
+    onOpenChange(false);
   }
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) resetForms(); onOpenChange(o); }}>
-      <SheetContent side="bottom" className="h-[92vh] overflow-y-auto rounded-t-3xl px-4 pb-10">
-        <SheetHeader className="mb-4">
-          <SheetTitle>Add to your routine</SheetTitle>
-        </SheetHeader>
+      <SheetContent side="bottom" className="h-[92vh] overflow-y-auto rounded-t-3xl px-4 md:px-8 pb-10">
+          <SheetHeader className="mb-4">
+            <SheetTitle>Add to your routine</SheetTitle>
+          </SheetHeader>
 
-        {error && <p className="text-sm text-destructive mb-3">{error}</p>}
+          {error && <p className="text-sm text-destructive mb-3">{error}</p>}
+          {warning && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-400 mb-3">
+              <p className="font-semibold mb-1">Habit added ✓ — progress tracking skipped</p>
+              <p>{warning}</p>
+              <button onClick={() => { setWarning(null); onOpenChange(false); }} className="mt-2 text-xs font-medium underline">Dismiss</button>
+            </div>
+          )}
 
-        <Tabs defaultValue={defaultTab}>
-          <TabsList className="w-full mb-5 h-auto">
-            <TabsTrigger value="habit" className="flex-1 text-xs py-2">Habit</TabsTrigger>
-            <TabsTrigger value="timed" className="flex-1 text-xs py-2">Event</TabsTrigger>
-            <TabsTrigger value="all_day" className="flex-1 text-xs py-2">Task</TabsTrigger>
-            <TabsTrigger value="deadline" className="flex-1 text-xs py-2">Deadline</TabsTrigger>
-          </TabsList>
+          <Tabs defaultValue={defaultTab} onValueChange={() => resetForms()}>
+            <TabsList className="w-full mb-5 h-auto">
+              <TabsTrigger value="habit" className="flex-1 text-xs py-2">Habit</TabsTrigger>
+              <TabsTrigger value="timed" className="flex-1 text-xs py-2">Event</TabsTrigger>
+              <TabsTrigger value="all_day" className="flex-1 text-xs py-2">Task</TabsTrigger>
+              <TabsTrigger value="deadline" className="flex-1 text-xs py-2">Deadline</TabsTrigger>
+            </TabsList>
 
-          {/* ─── HABIT ─── */}
-          <TabsContent value="habit">
-            <form onSubmit={handleHabitSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input placeholder="e.g. Morning run" value={habitName} onChange={e => setHabitName(e.target.value)} required />
-              </div>
-
-              {/* Frequency */}
-              <div className="space-y-2">
-                <Label>Frequency</Label>
-                <Select value={habitFreq} onValueChange={v => v && setHabitFreq(v as HabitFrequency)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly (with target)</SelectItem>
-                    <SelectItem value="specific_days_weekly">Specific days (weekly)</SelectItem>
-                    <SelectItem value="specific_dates_monthly">Specific dates (monthly)</SelectItem>
-                    <SelectItem value="specific_dates_yearly">Specific date (yearly)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {habitFreq === "weekly" && (
+            {/* ─── HABIT ─── */}
+            <TabsContent value="habit">
+              <form onSubmit={handleHabitSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Weekly target (days)</Label>
-                  <Input type="number" min={1} max={7} value={habitTarget} onChange={e => setHabitTarget(Number(e.target.value))} />
+                  <Label>Name</Label>
+                  <Input placeholder="e.g. Morning run" value={habitName} onChange={e => setHabitName(e.target.value)} required />
                 </div>
-              )}
 
-              {habitFreq === "specific_days_weekly" && (
+                {/* Progress tracking — before frequency */}
                 <div className="space-y-2">
-                  <Label>Which days?</Label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {DAYS_OF_WEEK.map(({ abbr, label }) => (
-                      <button
-                        key={abbr} type="button"
-                        onClick={() => toggleDay(abbr)}
-                        className={cn(
-                          "px-2.5 py-1.5 text-xs rounded-lg border font-medium transition-all",
-                          habitDays.includes(abbr)
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "border-border text-muted-foreground"
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between">
+                    <Label>Progress tracking</Label>
+                    <button
+                      type="button"
+                      onClick={() => setHabitProgressOn(!habitProgressOn)}
+                      className={cn(
+                        "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
+                        habitProgressOn
+                          ? "bg-primary border-primary text-primary-foreground"
+                          : "border-muted-foreground/40 hover:border-primary text-muted-foreground"
+                      )}
+                      aria-label={habitProgressOn ? "Remove progress tracking" : "Add progress tracking"}
+                    >
+                      {habitProgressOn ? (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M20 12H4" />
+                        </svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                      )}
+                    </button>
                   </div>
+                  {habitProgressOn && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="col-span-1 space-y-1">
+                        <Label className="text-xs">Start</Label>
+                        <Input type="number" min={0} value={habitStart} onChange={e => {
+                          let val = parseInt(e.target.value, 10);
+                          if (isNaN(val) || val < 0) val = 0;
+                          setHabitStart(String(val));
+                        }} placeholder="0" />
+                      </div>
+                      <div className="col-span-1 space-y-1">
+                        <Label className="text-xs">Target</Label>
+                        <Input type="number" min={1} value={habitTarget2} onChange={e => {
+                          let val = parseInt(e.target.value, 10);
+                          if (isNaN(val) || val < 1) val = 1;
+                          setHabitTarget2(String(val));
+                        }} placeholder="10000" />
+                      </div>
+                      <div className="col-span-1 space-y-1">
+                        <Label className="text-xs">Unit</Label>
+                        <Input value={habitMetric} onChange={e => setHabitMetric(e.target.value)} placeholder="steps" />
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
 
-              {habitFreq === "specific_dates_monthly" && (
+                {/* Frequency */}
                 <div className="space-y-2">
-                  <Label>Which dates of the month?</Label>
-                  <div className="flex gap-1 flex-wrap max-h-24 overflow-y-auto">
-                    {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
-                      <button
-                        key={d} type="button"
-                        onClick={() => toggleDate(d)}
-                        className={cn(
-                          "w-8 h-8 text-xs rounded-lg border font-medium transition-all",
-                          habitDates.includes(d)
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "border-border text-muted-foreground"
-                        )}
-                      >
-                        {d}
-                      </button>
-                    ))}
-                  </div>
+                  <Label>Frequency</Label>
+                  <Select value={habitFreq} onValueChange={v => v && setHabitFreq(v as HabitFrequency)}>
+                    <SelectTrigger>
+                      <SelectValue>{FREQ_LABELS[habitFreq]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      {!habitProgressOn && (
+                        <SelectItem value="weekly">Weekly (with target)</SelectItem>
+                      )}
+                      <SelectItem value="specific_days_weekly">Specific days (weekly)</SelectItem>
+                      <SelectItem value="specific_dates_monthly">Specific dates (monthly)</SelectItem>
+                      <SelectItem value="specific_dates_yearly">Specific date (yearly)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
 
-              {habitFreq === "specific_dates_yearly" && (
-                <div className="grid grid-cols-2 gap-3">
+                {habitFreq === "weekly" && !habitProgressOn && (
                   <div className="space-y-2">
-                    <Label>Month</Label>
-                    <Select value={habitYearlyMonth} onValueChange={(v) => v != null && setHabitYearlyMonth(v)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                    <Label>Weekly target (days)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={7}
+                      value={habitTarget}
+                      onChange={e => {
+                        let val = parseInt(e.target.value, 10);
+                        if (isNaN(val) || val < 1) val = 1;
+                        if (val > 7) val = 7;
+                        setHabitTarget(val);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {habitFreq === "specific_days_weekly" && (
+                  <div className="space-y-2">
+                    <Label>Which days?</Label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {DAYS_OF_WEEK.map(({ abbr, label }) => (
+                        <button
+                          key={abbr} type="button"
+                          onClick={() => toggleDay(abbr)}
+                          className={cn(
+                            "px-2.5 py-1.5 text-xs rounded-lg border font-medium transition-all",
+                            habitDays.includes(abbr)
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "border-border text-muted-foreground"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {habitFreq === "specific_dates_monthly" && (
+                  <div className="space-y-2">
+                    <Label>Which dates of the month?</Label>
+                    <div className="flex gap-1 flex-wrap max-h-24 overflow-y-auto">
+                      {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
+                        <button
+                          key={d} type="button"
+                          onClick={() => toggleDate(d)}
+                          className={cn(
+                            "w-8 h-8 text-xs rounded-lg border font-medium transition-all",
+                            habitDates.includes(d)
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "border-border text-muted-foreground"
+                          )}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {habitFreq === "specific_dates_yearly" && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Which date(s) each year?</Label>
+                      <button
+                        type="button"
+                        onClick={addYearlyDate}
+                        className="w-6 h-6 rounded-full border-2 border-primary/40 flex items-center justify-center text-primary hover:bg-primary/10 transition-all"
+                        aria-label="Add another date"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {habitYearlyDates.map((entry, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <div className="flex-1 grid grid-cols-2 gap-2">
+                            <Select value={entry.month} onValueChange={(v) => v && updateYearlyDate(idx, "month", v)}>
+                              <SelectTrigger>
+                                <SelectValue>{MONTH_NAMES[parseInt(entry.month, 10) - 1]}</SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {MONTH_NAMES.map((m, i) => (
+                                  <SelectItem key={m} value={String(i + 1).padStart(2, "0")}>{m}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={31}
+                              value={entry.day}
+                              onChange={e => updateYearlyDate(idx, "day", e.target.value)}
+                              placeholder="Day"
+                            />
+                          </div>
+                          {habitYearlyDates.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeYearlyDate(idx)}
+                              className="text-muted-foreground hover:text-destructive transition-colors"
+                              aria-label="Remove date"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Timing */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Timing</Label>
+                    <button
+                      type="button"
+                      onClick={() => setHabitShowExact(!habitShowExact)}
+                      className="text-xs text-primary"
+                    >
+                      {habitShowExact ? "Use time of day" : "Use exact time"}
+                    </button>
+                  </div>
+                  {habitShowExact ? (
+                    <Input type="time" value={habitExactTime} onChange={e => setHabitExactTime(e.target.value)} />
+                  ) : (
+                    <Select value={habitTimeOfDay} onValueChange={(v) => setHabitTimeOfDay(v ?? "")}>
+                      <SelectTrigger><SelectValue placeholder="Any time" /></SelectTrigger>
                       <SelectContent>
-                        {MONTHS.map((m, i) => (
-                          <SelectItem key={m} value={String(i + 1).padStart(2, "0")}>{m}</SelectItem>
-                        ))}
+                        <SelectItem value="">Any time</SelectItem>
+                        <SelectItem value="morning">Morning (12 AM–12 PM)</SelectItem>
+                        <SelectItem value="afternoon">Afternoon (12 PM–4 PM)</SelectItem>
+                        <SelectItem value="evening">Evening (4 PM–8 PM)</SelectItem>
+                        <SelectItem value="night">Night (8 PM–12 AM)</SelectItem>
                       </SelectContent>
                     </Select>
+                  )}
+                </div>
+
+                {/* Icon + Color */}
+                <div className="space-y-2">
+                  <Label>Icon</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {ICONS.map(ic => (
+                      <button key={ic} type="button" onClick={() => setHabitIcon(ic)}
+                        className={`text-xl p-1.5 rounded-xl border-2 transition-all ${habitIcon === ic ? "border-primary bg-accent" : "border-transparent"}`}>
+                        {ic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Color</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {COLORS.map(c => (
+                      <button key={c} type="button" onClick={() => setHabitColor(c)}
+                        style={{ backgroundColor: c }}
+                        className={`w-8 h-8 rounded-full border-4 transition-all ${habitColor === c ? "border-foreground scale-110" : "border-transparent"}`} />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea placeholder="Any notes…" value={habitDesc} onChange={e => setHabitDesc(e.target.value)} rows={2} />
+                </div>
+
+                <Button type="submit" className="w-full" disabled={isPending}>
+                  {isPending ? "Adding…" : "Add Habit"}
+                </Button>
+              </form>
+            </TabsContent>
+
+            {/* ─── TIMED EVENT ─── */}
+            <TabsContent value="timed">
+              <form onSubmit={handleTimedEventSubmit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label>Title</Label>
+                  <Input placeholder="e.g. Team standup" value={eventTitle} onChange={e => setEventTitle(e.target.value)} required />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Date</Label>
+                    <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} required />
                   </div>
                   <div className="space-y-2">
-                    <Label>Day</Label>
-                    <Input type="number" min={1} max={31} value={habitYearlyDate} onChange={e => setHabitYearlyDate(e.target.value)} />
+                    <Label>Start time</Label>
+                    <Input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)} required />
                   </div>
                 </div>
-              )}
-
-              {/* Timing */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Timing <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <button
-                    type="button"
-                    onClick={() => setHabitShowExact(!habitShowExact)}
-                    className="text-xs text-primary"
-                  >
-                    {habitShowExact ? "Use time of day" : "Use exact time"}
-                  </button>
+                <div className="space-y-2">
+                  <Label>End time</Label>
+                  <Input type="time" value={eventEndTime} onChange={e => setEventEndTime(e.target.value)} />
                 </div>
-                {habitShowExact ? (
-                  <Input type="time" value={habitExactTime} onChange={e => setHabitExactTime(e.target.value)} />
-                ) : (
-                  <Select value={habitTimeOfDay} onValueChange={(v) => setHabitTimeOfDay(v ?? "")}>
-                    <SelectTrigger><SelectValue placeholder="Any time" /></SelectTrigger>
+                <div className="space-y-2">
+                  <Label>Repeat</Label>
+                  <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
+                    <SelectTrigger>
+                      <SelectValue>{RECURRENCE_LABELS[recurrence] ?? recurrence}</SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Any time</SelectItem>
-                      <SelectItem value="morning">Morning (6am–12pm)</SelectItem>
-                      <SelectItem value="afternoon">Afternoon (12pm–5pm)</SelectItem>
-                      <SelectItem value="evening">Evening (5pm–9pm)</SelectItem>
-                      <SelectItem value="night">Night (9pm+)</SelectItem>
+                      <SelectItem value="none">No repeat</SelectItem>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="weekdays">Weekdays only</SelectItem>
+                      <SelectItem value="specific_days">Specific days (weekly)</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
                     </SelectContent>
                   </Select>
-                )}
-              </div>
-
-              {/* Icon + Color */}
-              <div className="space-y-2">
-                <Label>Icon</Label>
-                <div className="flex flex-wrap gap-2">
-                  {ICONS.map(ic => (
-                    <button key={ic} type="button" onClick={() => setHabitIcon(ic)}
-                      className={`text-xl p-1.5 rounded-xl border-2 transition-all ${habitIcon === ic ? "border-primary bg-accent" : "border-transparent"}`}>
-                      {ic}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Color</Label>
-                <div className="flex flex-wrap gap-2">
-                  {COLORS.map(c => (
-                    <button key={c} type="button" onClick={() => setHabitColor(c)}
-                      style={{ backgroundColor: c }}
-                      className={`w-8 h-8 rounded-full border-4 transition-all ${habitColor === c ? "border-foreground scale-110" : "border-transparent"}`} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Progress tracking toggle */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Progress tracking <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <button type="button" onClick={() => setHabitProgressOn(!habitProgressOn)} className="text-xs text-primary">
-                    {habitProgressOn ? "Remove" : "Add"}
-                  </button>
-                </div>
-                {habitProgressOn && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-1 space-y-1">
-                      <Label className="text-xs">Start</Label>
-                      <Input type="number" value={habitStart} onChange={e => setHabitStart(e.target.value)} placeholder="0" />
+                  {recurrence === "specific_days" && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {DAYS_OF_WEEK.map(({ abbr, label }) => (
+                        <button
+                          key={abbr}
+                          type="button"
+                          onClick={() => toggleEventDay(abbr)}
+                          className={cn(
+                            "px-3 py-1 rounded-full text-xs font-medium border transition-all",
+                            eventDays.includes(abbr)
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "border-muted-foreground/30 text-muted-foreground hover:border-primary"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
-                    <div className="col-span-1 space-y-1">
-                      <Label className="text-xs">Target</Label>
-                      <Input type="number" value={habitTarget2} onChange={e => setHabitTarget2(e.target.value)} placeholder="10000" />
-                    </div>
-                    <div className="col-span-1 space-y-1">
-                      <Label className="text-xs">Unit</Label>
-                      <Input value={habitMetric} onChange={e => setHabitMetric(e.target.value)} placeholder="steps" />
-                    </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              <div className="space-y-2">
-                <Label>Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea placeholder="Any notes…" value={habitDesc} onChange={e => setHabitDesc(e.target.value)} rows={2} />
-              </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
+                </div>
+                <Button type="submit" className="w-full" disabled={isPending}>
+                  {isPending ? "Adding…" : "Add Event"}
+                </Button>
+              </form>
+            </TabsContent>
 
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Adding…" : "Add Habit"}
-              </Button>
-            </form>
-          </TabsContent>
-
-          {/* ─── TIMED EVENT ─── */}
-          <TabsContent value="timed">
-            <form onSubmit={handleTimedEventSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Title</Label>
-                <Input placeholder="e.g. Team standup" value={eventTitle} onChange={e => setEventTitle(e.target.value)} required />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            {/* ─── TASK (all_day) ─── */}
+            <TabsContent value="all_day">
+              <form onSubmit={handleAllDaySubmit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label>Task</Label>
+                  <Input placeholder="e.g. Submit report" value={eventTitle} onChange={e => setEventTitle(e.target.value)} required />
+                </div>
                 <div className="space-y-2">
                   <Label>Date</Label>
-                  <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} required />
+                  <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required />
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Start time</Label>
-                  <Input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)} required />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>End time <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Input type="time" value={eventEndTime} onChange={e => setEventEndTime(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Repeat</Label>
-                <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No repeat</SelectItem>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="weekdays">Weekdays only</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="yearly">Yearly</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Progress */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Progress tracking <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <button type="button" onClick={() => setEventProgressOn(!eventProgressOn)} className="text-xs text-primary">
-                    {eventProgressOn ? "Remove" : "Add"}
-                  </button>
-                </div>
-                {eventProgressOn && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Target</Label>
-                      <Input type="number" value={eventTarget} onChange={e => setEventTarget(e.target.value)} placeholder="e.g. 5" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Unit</Label>
-                      <Input value={eventMetric} onChange={e => setEventMetric(e.target.value)} placeholder="e.g. km" />
-                    </div>
+                  <div className="flex items-center justify-between">
+                    <Label>Timing</Label>
+                    <button type="button" onClick={() => setEventShowExact(!eventShowExact)} className="text-xs text-primary">
+                      {eventShowExact ? "Use time of day" : "Use exact time"}
+                    </button>
                   </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Adding…" : "Add Event"}
-              </Button>
-            </form>
-          </TabsContent>
-
-          {/* ─── TASK (all_day) ─── */}
-          <TabsContent value="all_day">
-            <form onSubmit={handleAllDaySubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Task</Label>
-                <Input placeholder="e.g. Submit report" value={eventTitle} onChange={e => setEventTitle(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required />
-              </div>
-
-              {/* Timing */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Timing <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <button type="button" onClick={() => setEventShowExact(!eventShowExact)} className="text-xs text-primary">
-                    {eventShowExact ? "Use time of day" : "Use exact time"}
-                  </button>
+                  {eventShowExact ? (
+                    <Input type="time" value={dueTime} onChange={e => setDueTime(e.target.value)} />
+                  ) : (
+                    <Select value={eventTimeOfDay} onValueChange={(v) => setEventTimeOfDay(v ?? "")}>
+                      <SelectTrigger><SelectValue placeholder="Any time" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Any time</SelectItem>
+                        <SelectItem value="morning">Morning (12 AM–12 PM)</SelectItem>
+                        <SelectItem value="afternoon">Afternoon (12 PM–4 PM)</SelectItem>
+                        <SelectItem value="evening">Evening (4 PM–8 PM)</SelectItem>
+                        <SelectItem value="night">Night (8 PM–12 AM)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
-                {eventShowExact ? (
-                  <Input type="time" value={dueTime} onChange={e => setDueTime(e.target.value)} />
-                ) : (
-                  <Select value={eventTimeOfDay} onValueChange={(v) => setEventTimeOfDay(v ?? "")}>
-                    <SelectTrigger><SelectValue placeholder="Any time" /></SelectTrigger>
+
+                <div className="space-y-2">
+                  <Label>Repeat</Label>
+                  <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
+                    <SelectTrigger>
+                      <SelectValue>{RECURRENCE_LABELS[recurrence] ?? recurrence}</SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Any time</SelectItem>
-                      <SelectItem value="morning">Morning (6am–12pm)</SelectItem>
-                      <SelectItem value="afternoon">Afternoon (12pm–5pm)</SelectItem>
-                      <SelectItem value="evening">Evening (5pm–9pm)</SelectItem>
-                      <SelectItem value="night">Night (9pm+)</SelectItem>
+                      <SelectItem value="none">No repeat</SelectItem>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="weekdays">Weekdays only</SelectItem>
+                      <SelectItem value="specific_days">Specific days (weekly)</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
                     </SelectContent>
                   </Select>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>Repeat</Label>
-                <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No repeat</SelectItem>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="weekdays">Weekdays only</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="yearly">Yearly</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Progress */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Progress tracking <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <button type="button" onClick={() => setEventProgressOn(!eventProgressOn)} className="text-xs text-primary">
-                    {eventProgressOn ? "Remove" : "Add"}
-                  </button>
+                  {recurrence === "specific_days" && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {DAYS_OF_WEEK.map(({ abbr, label }) => (
+                        <button
+                          key={abbr}
+                          type="button"
+                          onClick={() => toggleEventDay(abbr)}
+                          className={cn(
+                            "px-3 py-1 rounded-full text-xs font-medium border transition-all",
+                            eventDays.includes(abbr)
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "border-muted-foreground/30 text-muted-foreground hover:border-primary"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {eventProgressOn && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Target</Label>
-                      <Input type="number" value={eventTarget} onChange={e => setEventTarget(e.target.value)} placeholder="e.g. 10" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Unit</Label>
-                      <Input value={eventMetric} onChange={e => setEventMetric(e.target.value)} placeholder="e.g. pages" />
-                    </div>
-                  </div>
-                )}
-              </div>
 
-              <div className="space-y-2">
-                <Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Adding…" : "Add Task"}
-              </Button>
-            </form>
-          </TabsContent>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
+                </div>
+                <Button type="submit" className="w-full" disabled={isPending}>
+                  {isPending ? "Adding…" : "Add Task"}
+                </Button>
+              </form>
+            </TabsContent>
 
-          {/* ─── DEADLINE ─── */}
-          <TabsContent value="deadline">
-            <form onSubmit={handleDeadlineSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>What&apos;s the deadline?</Label>
-                <Input placeholder="e.g. File taxes" value={eventTitle} onChange={e => setEventTitle(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label>Due date</Label>
-                <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label>Due time <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Input type="time" value={dueTime} onChange={e => setDueTime(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Start reminding me</Label>
-                <Select value={String(surfaceDays)} onValueChange={v => v && setSurfaceDays(Number(v))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1 day before</SelectItem>
-                    <SelectItem value="2">2 days before</SelectItem>
-                    <SelectItem value="3">3 days before</SelectItem>
-                    <SelectItem value="5">5 days before</SelectItem>
-                    <SelectItem value="7">1 week before</SelectItem>
-                    <SelectItem value="14">2 weeks before</SelectItem>
-                    <SelectItem value="30">1 month before</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Repeat</Label>
-                <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No repeat</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="yearly">Yearly</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Adding…" : "Add Deadline"}
-              </Button>
-            </form>
-          </TabsContent>
-        </Tabs>
+            {/* ─── DEADLINE ─── */}
+            <TabsContent value="deadline">
+              <form onSubmit={handleDeadlineSubmit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label>What&apos;s the deadline?</Label>
+                  <Input placeholder="e.g. File taxes" value={eventTitle} onChange={e => setEventTitle(e.target.value)} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Due date</Label>
+                  <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Due time</Label>
+                  <Input type="time" value={dueTime} onChange={e => setDueTime(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Start reminding me</Label>
+                  <Select value={String(surfaceDays)} onValueChange={v => v && setSurfaceDays(Number(v))}>
+                    <SelectTrigger>
+                      <SelectValue>{SURFACE_LABELS[String(surfaceDays)] ?? `${surfaceDays} days before`}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1 day before</SelectItem>
+                      <SelectItem value="2">2 days before</SelectItem>
+                      <SelectItem value="3">3 days before</SelectItem>
+                      <SelectItem value="5">5 days before</SelectItem>
+                      <SelectItem value="7">1 week before</SelectItem>
+                      <SelectItem value="14">2 weeks before</SelectItem>
+                      <SelectItem value="30">1 month before</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Repeat</Label>
+                  <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No repeat</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
+                </div>
+                <Button type="submit" className="w-full" disabled={isPending}>
+                  {isPending ? "Adding…" : "Add Deadline"}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
       </SheetContent>
     </Sheet>
   );

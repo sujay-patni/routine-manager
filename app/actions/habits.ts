@@ -12,15 +12,16 @@ import {
   updateCompletionProgress,
   createHabit as notionCreateHabit,
   updateHabit as notionUpdateHabit,
+  deleteHabit as notionDeleteHabit,
 } from "@/lib/notion/habits";
 import {
   getWeekBoundaries,
   getWeekBoundariesForDate,
   formatDateForDB,
   processHabits,
+  parseZonedOrLocal,
 } from "@/lib/habit-logic";
 import { getSettings } from "@/app/actions/settings";
-import { parseISO } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import type { Habit, HabitFrequency } from "@/lib/notion/types";
 
@@ -35,8 +36,8 @@ export async function getTodayHabits(dateStr?: string) {
   let weekEnd: Date;
 
   if (dateStr) {
-    targetDate = toZonedTime(parseISO(dateStr), timezone);
-    const bounds = getWeekBoundariesForDate(parseISO(dateStr), timezone, weekStartDay);
+    targetDate = parseZonedOrLocal(dateStr, timezone);
+    const bounds = getWeekBoundariesForDate(targetDate, timezone, weekStartDay);
     weekStart = bounds.weekStart;
     weekEnd = bounds.weekEnd;
   } else {
@@ -50,10 +51,16 @@ export async function getTodayHabits(dateStr?: string) {
   const weekStartStr = formatDateForDB(weekStart);
   const weekEndStr = formatDateForDB(weekEnd);
 
-  const [habits, completions] = await Promise.all([
+  const [allHabits, completions] = await Promise.all([
     notionGetAllHabits(),
     getCompletionsForWeek(weekStartStr, weekEndStr),
   ]);
+
+  // Only include habits that existed on or before the target date
+  const habits = allHabits.filter((h) => {
+    const createdInTz = toZonedTime(new Date(h.created_at), timezone);
+    return formatDateForDB(createdInTz) <= todayStr;
+  });
 
   const rawHabits = habits.map((h) => {
     const weekCompletions = completions.filter((c) => c.habit_id === h.id);
@@ -84,6 +91,7 @@ export async function getTodayHabits(dateStr?: string) {
       today_progress,
       week_progress,
       today_completion_id: todayCompletions[0]?.id ?? null,
+      completions_by_date: weekCompletions.map((c) => c.date),
     };
   });
 
@@ -99,21 +107,16 @@ export async function getTodayHabits(dateStr?: string) {
 }
 
 export async function completeHabit(habitId: string, date: string, habitName = "") {
-  // Return immediately with optimistic update; Notion write happens in background
-  after(async () => {
-    await createCompletion(habitId, date, habitName);
-    revalidatePath("/today");
-    revalidatePath("/weekly");
-  });
+  await createCompletion(habitId, date, habitName);
+  revalidatePath("/today");
+  revalidatePath("/weekly");
   return { success: true };
 }
 
 export async function uncompleteHabit(habitId: string, date: string) {
-  after(async () => {
-    await findAndDeleteCompletion(habitId, date);
-    revalidatePath("/today");
-    revalidatePath("/weekly");
-  });
+  await findAndDeleteCompletion(habitId, date);
+  revalidatePath("/today");
+  revalidatePath("/weekly");
   return { success: true };
 }
 
@@ -153,6 +156,7 @@ export async function createHabit(data: {
   progress_target?: number;
   progress_start?: number;
 }) {
+  const hasProgress = data.progress_metric || data.progress_target != null;
   try {
     await notionCreateHabit({
       ...data,
@@ -163,7 +167,33 @@ export async function createHabit(data: {
     revalidatePath("/settings");
     return { success: true };
   } catch (e) {
-    return { error: String(e) };
+    const msg = String(e);
+    // If Notion rejects because progress columns don't exist yet, retry without them
+    if (
+      hasProgress &&
+      (msg.includes("is not a property that exists") || msg.includes("not a property"))
+    ) {
+      try {
+        await notionCreateHabit({
+          ...data,
+          weekly_target:
+            data.frequency === "weekly" ? (data.weekly_target ?? 3) : data.weekly_target,
+          progress_metric: undefined,
+          progress_target: undefined,
+          progress_start: undefined,
+        });
+        revalidatePath("/today");
+        revalidatePath("/settings");
+        return {
+          success: true,
+          warning:
+            "Habit added, but progress tracking was skipped — your Notion Habits database is missing these columns: Progress Metric (text), Progress Target (number), Progress Start (number). Add them in Notion, then edit this habit to enable progress tracking.",
+        };
+      } catch (e2) {
+        return { error: String(e2) };
+      }
+    }
+    return { error: msg };
   }
 }
 
@@ -198,6 +228,18 @@ export async function updateHabit(
 
 export async function getAllHabits(): Promise<Habit[]> {
   return getAllHabitsIncludingInactive();
+}
+
+export async function deleteHabit(id: string) {
+  try {
+    await notionDeleteHabit(id);
+    revalidatePath("/today");
+    revalidatePath("/settings");
+    revalidatePath("/weekly");
+    return { success: true };
+  } catch (e) {
+    return { error: String(e) };
+  }
 }
 
 export async function getWeeklySummary() {

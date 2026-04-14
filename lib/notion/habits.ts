@@ -25,6 +25,23 @@ function pageToHabit(page: any): Habit {
   };
 }
 
+async function queryWithBackoff(params: any): Promise<any> {
+  let retries = 3;
+  let delay = 1000;
+  while (true) {
+    try {
+      return await notion.dataSources.query({ ...params, page_size: params.page_size || 50 });
+    } catch (e: any) {
+      if (retries <= 0 || (e.status !== 503 && e.status !== 502 && !e.message?.includes("temporarily unavailable"))) {
+        throw e;
+      }
+      await new Promise((res) => setTimeout(res, delay));
+      delay *= 2;
+      retries--;
+    }
+  }
+}
+
 function pageToCompletion(page: any): Completion {
   const props = page.properties;
   return {
@@ -41,7 +58,7 @@ export async function getAllHabits(): Promise<Habit[]> {
   let cursor: string | undefined;
 
   do {
-    const response = await notion.dataSources.query({
+    const response = await queryWithBackoff({
       data_source_id: HABITS_DB,
       filter: { property: "Active", checkbox: { equals: true } },
       start_cursor: cursor,
@@ -58,7 +75,7 @@ export async function getAllHabitsIncludingInactive(): Promise<Habit[]> {
   let cursor: string | undefined;
 
   do {
-    const response = await notion.dataSources.query({
+    const response = await queryWithBackoff({
       data_source_id: HABITS_DB,
       start_cursor: cursor,
     });
@@ -77,7 +94,7 @@ export async function getCompletionsForWeek(
   let cursor: string | undefined;
 
   do {
-    const response = await notion.dataSources.query({
+    const response = await queryWithBackoff({
       data_source_id: COMPLETIONS_DB,
       filter: {
         and: [
@@ -95,11 +112,18 @@ export async function getCompletionsForWeek(
 }
 
 export async function getCompletionsForDate(date: string): Promise<Completion[]> {
-  const response = await notion.dataSources.query({
+  const response = await queryWithBackoff({
     data_source_id: COMPLETIONS_DB,
     filter: { property: "Date", date: { equals: date } },
   }) as any;
   return response.results.map(pageToCompletion);
+}
+
+async function ensureCompletionProgressColumn(): Promise<void> {
+  await (notion.dataSources as any).update({
+    data_source_id: COMPLETIONS_DB,
+    properties: { "Progress Value": { number: {} } },
+  });
 }
 
 export async function createCompletion(
@@ -117,12 +141,36 @@ export async function createCompletion(
     props["Progress Value"] = { number: progressValue };
   }
 
-  const page = await notion.pages.create({
-    parent: { data_source_id: COMPLETIONS_DB },
-    properties: props,
-  }) as any;
-
-  return pageToCompletion(page);
+  try {
+    const page = await notion.pages.create({
+      parent: { data_source_id: COMPLETIONS_DB },
+      properties: props,
+    }) as any;
+    return pageToCompletion(page);
+  } catch (e: any) {
+    if (progressValue === undefined) throw e;
+    const msg: string = e?.message ?? String(e);
+    const isMissingColumn =
+      msg.includes("is not a property that exists") ||
+      msg.includes("not a property") ||
+      msg.includes("Progress Value");
+    if (!isMissingColumn) throw e;
+    // Column missing — add it, then retry without the progress value in the creation
+    // (the column will be set by updateCompletionProgress after creation).
+    await ensureCompletionProgressColumn();
+    const propsWithout = { ...props };
+    delete propsWithout["Progress Value"];
+    const page = await notion.pages.create({
+      parent: { data_source_id: COMPLETIONS_DB },
+      properties: propsWithout,
+    }) as any;
+    // Now set the progress value on the newly created page.
+    await notion.pages.update({
+      page_id: page.id,
+      properties: { "Progress Value": { number: progressValue } },
+    });
+    return pageToCompletion(page);
+  }
 }
 
 export async function deleteCompletion(completionId: string): Promise<void> {
@@ -145,10 +193,24 @@ export async function findCompletion(habitId: string, date: string): Promise<Com
 }
 
 export async function updateCompletionProgress(completionId: string, progressValue: number): Promise<void> {
-  await notion.pages.update({
-    page_id: completionId,
-    properties: { "Progress Value": { number: progressValue } },
-  });
+  try {
+    await notion.pages.update({
+      page_id: completionId,
+      properties: { "Progress Value": { number: progressValue } },
+    });
+  } catch (e: any) {
+    const msg: string = e?.message ?? String(e);
+    const isMissingColumn =
+      msg.includes("is not a property that exists") ||
+      msg.includes("not a property") ||
+      msg.includes("Progress Value");
+    if (!isMissingColumn) throw e;
+    await ensureCompletionProgressColumn();
+    await notion.pages.update({
+      page_id: completionId,
+      properties: { "Progress Value": { number: progressValue } },
+    });
+  }
 }
 
 export async function findAndDeleteCompletion(habitId: string, date: string): Promise<void> {
@@ -206,6 +268,10 @@ export async function createHabit(data: {
   }) as any;
 
   return pageToHabit(page);
+}
+
+export async function deleteHabit(id: string): Promise<void> {
+  await notion.pages.update({ page_id: id, in_trash: true });
 }
 
 export async function updateHabit(

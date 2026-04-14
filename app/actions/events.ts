@@ -7,13 +7,12 @@ import {
   getAllEventsIncludingCompleted,
   createEvent as notionCreateEvent,
   completeEvent as notionCompleteEvent,
-  updateEventProgress as notionUpdateEventProgress,
+  setEventCompleted as notionSetEventCompleted,
   deleteEvent as notionDeleteEvent,
   updateEvent as notionUpdateEvent,
 } from "@/lib/notion/events";
-import { getWeekBoundaries, formatDateForDB, getDeadlineState } from "@/lib/habit-logic";
+import { getWeekBoundaries, formatDateForDB, getDeadlineState, parseZonedOrLocal } from "@/lib/habit-logic";
 import { getSettings } from "@/app/actions/settings";
-import { parseISO } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import type { AppEvent } from "@/lib/notion/types";
 
@@ -22,29 +21,72 @@ export interface TodayEvent extends AppEvent {
   isOverdue?: boolean;
 }
 
+import { rrulestr } from "rrule";
+
+function getRecurrenceInstance(event: AppEvent, targetDate: Date, timezone: string, todayStr: string): Date | null {
+  if (!event.is_recurring || !event.recurrence_rule) return null;
+  try {
+    const baseStr = event.event_type === "timed" ? event.start_time : event.due_date;
+    if (!baseStr) return null;
+    let dtstart = baseStr.replace(/[-:]/g, "");
+    if (dtstart.includes(".")) dtstart = dtstart.split(".")[0] + "Z";
+    if (!dtstart.includes("T")) dtstart += "T120000Z";
+    const ruleStr = `DTSTART:${dtstart}\nRRULE:${event.recurrence_rule}`;
+    const rule = rrulestr(ruleStr);
+    const probeStart = new Date(targetDate.getTime() - 48 * 3600 * 1000);
+    const probeEnd = new Date(targetDate.getTime() + 48 * 3600 * 1000);
+    const instances = rule.between(probeStart, probeEnd, true);
+    for (const inst of instances) {
+      if (formatDateForDB(toZonedTime(inst, timezone)) === todayStr) return inst;
+    }
+  } catch (e) {
+    console.error("Failed to parse RRule:", e);
+  }
+  return null;
+}
+
 export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
   const settings = await getSettings();
   const { timezone, deadline_surface_days: defaultSurfaceDays } = settings;
 
   let targetDate: Date;
   if (dateStr) {
-    targetDate = toZonedTime(parseISO(dateStr), timezone);
+    targetDate = parseZonedOrLocal(dateStr, timezone);
   } else {
     const { today } = getWeekBoundaries(timezone);
     targetDate = today;
   }
   const todayStr = formatDateForDB(targetDate);
 
-  const allEvents = await getAllEvents();
+  const allEvents = await getAllEventsIncludingCompleted();
   const todayEvents: TodayEvent[] = [];
 
   for (const event of allEvents) {
     if (event.event_type === "timed") {
       if (!event.start_time) continue;
-      const eventDate = event.start_time.split("T")[0];
-      if (eventDate === todayStr) todayEvents.push(event);
+      if (event.is_recurring) {
+        const inst = getRecurrenceInstance(event, targetDate, timezone, todayStr);
+        if (inst) {
+          let newEnd = event.end_time;
+          if (event.start_time && event.end_time) {
+            const durMs = new Date(event.end_time).getTime() - new Date(event.start_time).getTime();
+            newEnd = new Date(inst.getTime() + durMs).toISOString();
+          }
+          todayEvents.push({ ...event, id: `${event.id}_${todayStr}`, start_time: inst.toISOString(), end_time: newEnd });
+        }
+      } else {
+        const eventDate = formatDateForDB(parseZonedOrLocal(event.start_time, timezone));
+        if (eventDate === todayStr) todayEvents.push(event);
+      }
     } else if (event.event_type === "all_day") {
-      if (event.due_date === todayStr) todayEvents.push(event);
+      if (event.is_recurring) {
+        const inst = getRecurrenceInstance(event, targetDate, timezone, todayStr);
+        if (inst) {
+           todayEvents.push({ ...event, id: `${event.id}_${todayStr}`, due_date: todayStr });
+        }
+      } else {
+        if (event.due_date === todayStr) todayEvents.push(event);
+      }
     } else if (event.event_type === "deadline") {
       const surfaceDays = event.surface_days ?? defaultSurfaceDays;
       const { show, daysUntil, isOverdue } = getDeadlineState(
@@ -67,7 +109,68 @@ export async function getUpcomingEvents(): Promise<AppEvent[]> {
 }
 
 export async function getAllEventsForCalendar(): Promise<AppEvent[]> {
-  return getAllEventsIncludingCompleted();
+  const settings = await getSettings();
+  const { timezone } = settings;
+
+  const allEvents = await getAllEventsIncludingCompleted();
+  const result: AppEvent[] = [];
+
+  // Expand from 3 months ago to 6 months from now
+  const rangeStart = new Date();
+  rangeStart.setMonth(rangeStart.getMonth() - 3);
+  rangeStart.setHours(0, 0, 0, 0);
+  const rangeEnd = new Date();
+  rangeEnd.setMonth(rangeEnd.getMonth() + 6);
+  rangeEnd.setHours(23, 59, 59, 999);
+
+  for (const event of allEvents) {
+    if (!event.is_recurring || !event.recurrence_rule) {
+      result.push(event);
+      continue;
+    }
+
+    try {
+      const baseStr = event.event_type === "timed" ? event.start_time : event.due_date;
+      if (!baseStr) { result.push(event); continue; }
+
+      let dtstart = baseStr.replace(/[-:]/g, "");
+      if (dtstart.includes(".")) dtstart = dtstart.split(".")[0] + "Z";
+      if (!dtstart.includes("T")) dtstart += "T120000Z";
+
+      const ruleStr = `DTSTART:${dtstart}\nRRULE:${event.recurrence_rule}`;
+      const rule = rrulestr(ruleStr);
+      const instances = rule.between(rangeStart, rangeEnd, true);
+
+      for (const inst of instances) {
+        const instanceDateStr = formatDateForDB(toZonedTime(inst, timezone));
+
+        if (event.event_type === "timed") {
+          let newEnd = event.end_time;
+          if (event.start_time && event.end_time) {
+            const durMs = new Date(event.end_time).getTime() - new Date(event.start_time).getTime();
+            newEnd = new Date(inst.getTime() + durMs).toISOString();
+          }
+          result.push({
+            ...event,
+            id: `${event.id}_${instanceDateStr}`,
+            start_time: inst.toISOString(),
+            end_time: newEnd,
+          });
+        } else if (event.event_type === "all_day") {
+          result.push({
+            ...event,
+            id: `${event.id}_${instanceDateStr}`,
+            due_date: instanceDateStr,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to expand RRule for calendar:", e);
+      result.push(event); // fallback: show original
+    }
+  }
+
+  return result;
 }
 
 export async function createEvent(data: {
@@ -82,8 +185,6 @@ export async function createEvent(data: {
   surface_days?: number;
   time_of_day?: string;
   due_time?: string;
-  progress_metric?: string;
-  progress_target?: number;
 }) {
   try {
     await notionCreateEvent(data);
@@ -101,27 +202,26 @@ export async function completeEvent(id: string) {
     await notionCompleteEvent(id);
     revalidatePath("/today");
     revalidatePath("/schedule");
+    revalidatePath("/calendar");
   });
   return { success: true };
 }
 
-export async function updateEventProgress(id: string, progressValue: number, autoComplete = false) {
+export async function setEventCompleted(id: string, isCompleted: boolean) {
   try {
-    await notionUpdateEventProgress(id, progressValue);
-    if (autoComplete) {
-      await notionCompleteEvent(id);
-    }
+    await notionSetEventCompleted(id, isCompleted);
     revalidatePath("/today");
     revalidatePath("/schedule");
+    revalidatePath("/calendar");
     return { success: true };
   } catch (e) {
     return { error: String(e) };
   }
 }
 
-export async function deleteEvent(id: string) {
+export async function deleteEvent(id: string, excludeDate?: string) {
   try {
-    await notionDeleteEvent(id);
+    await notionDeleteEvent(id, excludeDate);
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
@@ -145,9 +245,6 @@ export async function updateEvent(
     surface_days: number;
     time_of_day: string | null;
     due_time: string | null;
-    progress_metric: string | null;
-    progress_target: number | null;
-    progress_value: number | null;
   }>
 ) {
   try {

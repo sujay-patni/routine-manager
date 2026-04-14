@@ -49,10 +49,6 @@ export interface AppEvent {
   // scheduling
   time_of_day: TimeOfDay | null;
   due_time: string | null;       // "HH:MM" for tasks/deadlines
-  // progress tracking
-  progress_metric: string | null;
-  progress_target: number | null;
-  progress_value: number | null;
 }
 
 export interface AppSettings {

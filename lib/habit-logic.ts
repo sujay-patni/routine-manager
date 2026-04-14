@@ -10,7 +10,19 @@ import {
 import { toZonedTime } from "date-fns-tz";
 import type { Habit } from "./notion/types";
 
-export type HabitState = "done" | "satisfied" | "at_risk" | "urgent" | "pending" | "optional";
+export type HabitState = "done" | "satisfied" | "urgent" | "pending" | "optional";
+
+export function parseZonedOrLocal(dateStr: string, timezone: string): Date {
+  if (!dateStr.includes("T")) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    // Create Date without timezone shift. 
+    // Simply construct a date in the current system local time, but we don't care about system local!
+    // We want a date that, when passed through format(), shows the year, month, day we parsed.
+    // Date(y, m-1, d) does exactly that. format() uses local system time to get the string, so a local system Date object is perfectly aligned with format().
+    return new Date(y, m - 1, d, 0, 0, 0);
+  }
+  return toZonedTime(parseISO(dateStr), timezone);
+}
 
 // Day abbreviations indexed by getDay() (0=Sun, 1=Mon, ..., 6=Sat)
 const DAY_ABBREVS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
@@ -21,6 +33,7 @@ export interface HabitWithCounts extends Habit {
   today_progress: number | null;
   week_progress: number | null;
   today_completion_id: string | null;
+  completions_by_date?: string[];
 }
 
 export interface ProcessedHabit extends HabitWithCounts {
@@ -105,9 +118,9 @@ function isHabitScheduledForDay(habit: Habit, day: Date): boolean {
 
     case "specific_dates_yearly": {
       if (!habit.specific_days) return true;
-      // Format: "MM-DD"
+      // Format: "MM-DD" or comma-separated "MM-DD,MM-DD,..."
       const mmdd = `${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-      return habit.specific_days.trim() === mmdd;
+      return habit.specific_days.split(",").map((s) => s.trim()).includes(mmdd);
     }
 
     default:
@@ -157,11 +170,10 @@ export function shouldShowHabit(
   let state: HabitState;
   let show: boolean;
 
-  // Habits not scheduled for today are hidden (except if at_risk)
+  // Habits not scheduled for today are hidden unless falling behind weekly target
   if (!scheduledToday) {
-    // For specific-schedule habits: show at_risk if falling behind weekly target
     if (remaining > daysLeft) {
-      state = "at_risk";
+      state = "urgent";
       show = true;
     } else {
       state = "optional";
@@ -177,9 +189,15 @@ export function shouldShowHabit(
     state = "satisfied";
     show = false;
   } else if (remaining > daysLeft) {
-    state = "at_risk";
+    state = "urgent";
     show = true;
-  } else if (habit.frequency === "daily" || habit.frequency === "specific_days_weekly" || habit.frequency === "specific_dates_monthly" || habit.frequency === "specific_dates_yearly") {
+  } else if (
+    habit.frequency === "daily" ||
+    habit.frequency === "weekly" ||
+    habit.frequency === "specific_days_weekly" ||
+    habit.frequency === "specific_dates_monthly" ||
+    habit.frequency === "specific_dates_yearly"
+  ) {
     state = "pending";
     show = true;
   } else if (remaining >= daysLeft) {
@@ -212,7 +230,7 @@ export function getDeadlineState(
   isOverdue: boolean;
 } {
   const ref = referenceDate ?? toZonedTime(new Date(), timezone);
-  const dueDate = parseISO(dueDateStr);
+  const dueDate = parseZonedOrLocal(dueDateStr, timezone);
   const diff = differenceInDays(dueDate, ref);
 
   return {
