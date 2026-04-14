@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition, useState } from "react";
-import { useRouter } from "next/navigation";
 import { completeHabit, uncompleteHabit, logHabitProgress } from "@/app/actions/habits";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +12,7 @@ interface HabitCardProps {
   habit: ProcessedHabit;
   today: string;
   onDoneChange?: (id: string, done: boolean) => void;
-  onToggle?: (id: string, done: boolean, serverFn: () => Promise<any>) => void;
+  onToggle?: (id: string, done: boolean, serverFn: () => Promise<void>) => void;
   onEdit?: () => void;
 }
 
@@ -33,7 +32,6 @@ const stateConfig = {
 };
 
 export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit }: HabitCardProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
   const [localProgress, setLocalProgress] = useState(habit.today_progress ?? 0);

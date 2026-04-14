@@ -171,7 +171,6 @@ export async function updateEvent(
     due_time: string | null;
   }>
 ): Promise<void> {
-  const [baseId] = id.split("_");
   const props: Record<string, any> = {};
   if (data.title !== undefined) props["Title"] = { title: [{ text: { content: data.title } }] };
   if (data.description !== undefined) props["Description"] = { rich_text: [{ text: { content: data.description } }] };

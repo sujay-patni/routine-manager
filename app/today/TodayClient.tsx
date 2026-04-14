@@ -140,7 +140,7 @@ export default function TodayClient({
     setDoneOverrides((prev) => new Map(prev).set(id, done));
   }
 
-  const [isTogglingHabit, startHabitTransition] = useTransition();
+  const [, startHabitTransition] = useTransition();
 
   function handleHabitToggle(id: string, done: boolean, serverFn: () => Promise<void>) {
     handleDoneChange(id, done);

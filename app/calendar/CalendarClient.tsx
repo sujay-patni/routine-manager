@@ -4,9 +4,9 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, format, isSameMonth, isSameDay,
-  addMonths, subMonths, addWeeks, subWeeks, addDays, subDays,
-  addYears, subYears, isToday, startOfYear, endOfYear,
-  getMonth, getYear,
+  addMonths, addWeeks, addDays,
+  addYears, isToday,
+  getMonth, getYear, parseISO,
 } from "date-fns";
 // removed toZonedTime import
 import { parseZonedOrLocal } from "@/lib/habit-logic";
@@ -258,13 +258,7 @@ export default function CalendarClient({ events, weekStartDay, timezone }: Props
               <div
                 className="absolute inset-0 cursor-pointer"
                 style={{ zIndex: -1 }}
-                onClick={(e) => {
-                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  const relY = e.clientY - rect.top;
-                  const minutes = Math.round(relY / (PX_PER_HOUR / 60) / 30) * 30;
-                  const h = Math.min(23, Math.floor(minutes / 60));
-                  const m = minutes % 60;
-                  const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+                onClick={() => {
                   openAdd("timed", dateStr);
                 }}
               />
