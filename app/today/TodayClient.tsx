@@ -36,6 +36,12 @@ const TIME_SECTIONS: { key: TimeKey; label: string; icon: string; range: string 
   { key: "night",     label: "Night",     icon: "🌙", range: "8 PM – 4 AM"  },
 ];
 
+const WEEK_SECTION_ORDER = ["morning", "afternoon", "evening", "night", "all_day"] as const;
+type WeekSectionKey = (typeof WEEK_SECTION_ORDER)[number];
+const WEEK_SECTION_LABELS: Record<WeekSectionKey, string> = {
+  morning: "🌅 Morning", afternoon: "☀️ Afternoon", evening: "🌆 Evening", night: "🌙 Night", all_day: "🗓 All Day",
+};
+
 function hourToSection(h: number): TimeKey {
   if (h >= 4  && h < 12) return "morning";
   if (h >= 12 && h < 16) return "afternoon";
@@ -261,12 +267,23 @@ export default function TodayClient({
     ? eachDayOfInterval({ start: parseISO(weekStart), end: parseISO(weekEnd) })
     : [];
   
-  // The 'This Week' table only makes sense for habits tracked on a daily/weekly basis
+  // The 'This Week' table only makes sense for habits tracked on a daily/weekly basis.
+  // Exclude progress habits with monthly/yearly reset — their period spans beyond a week.
   const activeHabits = optHabits.filter((h) => {
     if (!h.is_active) return false;
     const freq = h.frequency;
-    return freq === "daily" || freq === "weekly" || freq === "specific_days_weekly";
+    if (!(freq === "daily" || freq === "weekly" || freq === "specific_days_weekly")) return false;
+    if (h.progress_metric && h.progress_period !== "daily") return false;
+    return true;
   }) as HabitWithDates[];
+
+  const habitsByWeekSection = new Map<WeekSectionKey, HabitWithDates[]>(
+    WEEK_SECTION_ORDER.map((sec) => [sec, []])
+  );
+  for (const h of [...activeHabits].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))) {
+    const sec = habitSection(h as ProcessedHabit) ?? "all_day";
+    habitsByWeekSection.get(sec)!.push(h);
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -325,14 +342,42 @@ export default function TodayClient({
           const sEvents = eventsBySection.get(key) ?? [];
           if (sHabits.length === 0 && sEvents.length === 0) return null;
 
-          type Entry =
-            | { kind: "habit"; item: ProcessedHabit; mins: number }
-            | { kind: "event"; item: TodayEvent; mins: number };
+          type Entry = {
+            kind: "habit" | "event";
+            item: ProcessedHabit | TodayEvent;
+            sortKey: number;
+            done: boolean;
+            timed: boolean;
+          };
 
           const entries: Entry[] = [
-            ...sHabits.map((h) => ({ kind: "habit" as const, item: h, mins: exactMinutes(h) })),
-            ...sEvents.map((e) => ({ kind: "event" as const, item: e, mins: eventMinutes(e) })),
-          ].sort((a, b) => a.mins - b.mins);
+            ...sHabits.map((h) => ({
+              kind: "habit" as const,
+              item: h,
+              sortKey: h.exact_time ? exactMinutes(h) : (h.sort_order ?? 9999),
+              done: h.completed_today > 0,
+              timed: !!h.exact_time,
+            })),
+            ...sEvents.map((e) => {
+              const m = eventMinutes(e);
+              return {
+                kind: "event" as const,
+                item: e,
+                sortKey: m >= 0 ? m : 9999,
+                done: e.is_completed,
+                timed: m >= 0,
+              };
+            }),
+          ];
+
+          // Sort: untimed-notdone → timed-notdone → untimed-done → timed-done
+          // Within each group: by sortKey (sort_order for untimed, time for timed)
+          entries.sort((a, b) => {
+            const groupA = (a.timed ? 1 : 0) + (a.done ? 2 : 0);
+            const groupB = (b.timed ? 1 : 0) + (b.done ? 2 : 0);
+            if (groupA !== groupB) return groupA - groupB;
+            return a.sortKey - b.sortKey;
+          });
 
           return (
             <section key={key}>
@@ -343,6 +388,43 @@ export default function TodayClient({
               </h2>
               <div className="space-y-2">
                 {entries.map((entry) =>
+                  entry.kind === "habit" ? (
+                    <HabitCard
+                      key={entry.item.id}
+                      habit={entry.item as ProcessedHabit}
+                      today={today}
+                      onDoneChange={handleDoneChange}
+                      onToggle={handleHabitToggle}
+                      onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
+                    />
+                  ) : (
+                    <EventCard
+                      key={entry.item.id}
+                      event={entry.item as TodayEvent}
+                      onDoneChange={handleDoneChange}
+                      onEdit={() => setEditEvent(entry.item as TodayEvent)}
+                    />
+                  )
+                )}
+              </div>
+            </section>
+          );
+        })}
+
+        {/* All Day — untimed items */}
+        {(allDayHabits.length > 0 || allDayEvents.length > 0) && (
+          <section>
+            <h2 className="text-xs font-semibold text-muted-foreground mb-2">🗓 All Day</h2>
+            <div className="space-y-2">
+              {[
+                ...allDayHabits.map(h => ({ kind: "habit" as const, item: h, sortKey: h.sort_order ?? 9999, done: h.completed_today > 0 })),
+                ...allDayEvents.map(e => ({ kind: "event" as const, item: e, sortKey: 9999, done: e.is_completed })),
+              ]
+                .sort((a, b) => {
+                  if (a.done !== b.done) return a.done ? 1 : -1;
+                  return a.sortKey - b.sortKey;
+                })
+                .map(entry =>
                   entry.kind === "habit" ? (
                     <HabitCard
                       key={entry.item.id}
@@ -360,36 +442,8 @@ export default function TodayClient({
                       onEdit={() => setEditEvent(entry.item)}
                     />
                   )
-                )}
-              </div>
-            </section>
-          );
-        })}
-
-        {/* All Day — untimed habits + events */}
-        {(allDayHabits.length > 0 || allDayEvents.length > 0) && (
-          <section>
-            <h2 className="text-xs font-semibold text-muted-foreground mb-2">All Day</h2>
-            <div className="space-y-2">
-              {allDayHabits.map((h) => (
-                <HabitCard
-                  key={h.id}
-                  habit={h}
-                  today={today}
-                  onDoneChange={handleDoneChange}
-                  onToggle={handleHabitToggle}
-                  onEdit={() => setEditHabit(h)}
-                />
-              ))}
-              {allDayEvents.map((e) => (
-                <EventCard
-                  key={e.id}
-                  event={e}
-
-                  onDoneChange={handleDoneChange}
-                  onEdit={() => setEditEvent(e)}
-                />
-              ))}
+                )
+              }
             </div>
           </section>
         )}
@@ -434,8 +488,9 @@ export default function TodayClient({
             </button>
 
             {weekExpanded && (
-              <div className="px-4 pb-4 space-y-3">
-                <div className="grid grid-cols-[1fr_repeat(7,_1.75rem)] gap-1 items-center">
+              <div className="px-4 pb-4 space-y-3 overflow-x-auto">
+                {/* Day header */}
+                <div className="grid gap-1 items-center min-w-[420px]" style={{ gridTemplateColumns: "minmax(100px,1fr) repeat(7, 1.75rem)" }}>
                   <div />
                   {weekDays.map((d) => (
                     <div key={d.toISOString()} className="text-center text-xs text-muted-foreground font-medium">
@@ -443,40 +498,51 @@ export default function TodayClient({
                     </div>
                   ))}
                 </div>
-                {activeHabits.map((habit) => {
-                  const target = habit.frequency === "daily" ? 7 : (habit.weekly_target ?? 1);
-                  const done = Number(habit.completions_this_week);
-                  const pct = Math.min(100, Math.round((done / target) * 100));
-                  const completedSet = new Set(habit.completions_by_date ?? []);
+
+                {/* Habits grouped by section */}
+                {WEEK_SECTION_ORDER.map((sec) => {
+                  const secHabits = habitsByWeekSection.get(sec) ?? [];
+                  if (secHabits.length === 0) return null;
                   return (
-                    <div key={habit.id} className="space-y-1">
-                      <div className="grid grid-cols-[1fr_repeat(7,_1.75rem)] gap-1 items-center">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: habit.color }} />
-                          <span className="text-xs font-medium truncate">{habit.icon} {habit.name}</span>
-                        </div>
-                        {weekDays.map((d) => {
-                          const dayStr = format(d, "yyyy-MM-dd");
-                          const completed = completedSet.has(dayStr);
-                          return (
-                            <div
-                              key={dayStr}
-                              className={cn("w-7 h-7 rounded-full flex items-center justify-center mx-auto", completed ? "text-white" : "bg-muted")}
-                              style={completed ? { backgroundColor: habit.color } : {}}
-                            >
-                              {completed && (
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
+                    <div key={sec} className="space-y-2">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide min-w-[420px]">
+                        {WEEK_SECTION_LABELS[sec]}
+                      </p>
+                      {secHabits.map((habit) => {
+                        const target = habit.frequency === "daily" ? 7 : (habit.weekly_target ?? 1);
+                        const done = Number(habit.completions_this_week);
+                        const pct = Math.min(100, Math.round((done / target) * 100));
+                        const completedSet = new Set(habit.completions_by_date ?? []);
+                        return (
+                          <div key={habit.id} className="space-y-1 min-w-[420px]">
+                            <div className="grid gap-1 items-center" style={{ gridTemplateColumns: "minmax(100px,1fr) repeat(7, 1.75rem)" }}>
+                              <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                                <span className="text-xs font-medium">{habit.name}</span>
+                              </div>
+                              {weekDays.map((d) => {
+                                const dayStr = format(d, "yyyy-MM-dd");
+                                const completed = completedSet.has(dayStr);
+                                return (
+                                  <div
+                                    key={dayStr}
+                                    className={cn("w-7 h-7 rounded-full flex items-center justify-center mx-auto", completed ? "bg-primary text-primary-foreground" : "bg-muted")}
+                                  >
+                                    {completed && (
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Progress value={pct} className="flex-1 h-1" />
-                        <span className="text-xs text-muted-foreground flex-shrink-0 w-10 text-right">{done}/{target}</span>
-                      </div>
+                            <div className="flex items-center gap-2 min-w-[420px]">
+                              <Progress value={pct} className="flex-1 h-1" />
+                              <span className="text-xs text-muted-foreground flex-shrink-0 w-10 text-right">{done}/{target}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}

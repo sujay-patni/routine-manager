@@ -16,11 +16,11 @@ interface HabitCardProps {
   onEdit?: () => void;
 }
 
-const TIME_OF_DAY_LABEL: Record<string, string> = {
-  morning: "Morning",
-  afternoon: "Afternoon",
-  evening: "Evening",
-  night: "Night",
+const PERIOD_LABELS: Record<string, string> = {
+  daily: "today",
+  weekly: "this week",
+  monthly: "this month",
+  yearly: "this year",
 };
 
 const stateConfig = {
@@ -34,12 +34,15 @@ const stateConfig = {
 export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit }: HabitCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
+  // Period total (for display in progress bar)
   const [localProgress, setLocalProgress] = useState(habit.today_progress ?? 0);
+  // Today's individual contribution (pre-fills the inline editor)
+  const [localContribution, setLocalContribution] = useState(habit.today_contribution ?? 0);
   const [progressEditing, setProgressEditing] = useState(false);
-  const [inputVal, setInputVal] = useState(String(habit.today_progress ?? 0));
+  const [inputVal, setInputVal] = useState(String(habit.today_contribution ?? 0));
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync state cleanly if the date we are viewing changes without a remount or server returns updated progress data
+  // Sync state if date changes or server returns updated data
   const [prevTodayStr, setPrevTodayStr] = useState(today);
   const [prevBaseCount, setPrevBaseCount] = useState(habit.completed_today);
   if (today !== prevTodayStr || habit.completed_today !== prevBaseCount) {
@@ -47,7 +50,8 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
     setPrevBaseCount(habit.completed_today);
     setLocalDone(habit.completed_today > 0);
     setLocalProgress(habit.today_progress ?? 0);
-    setInputVal(String(habit.today_progress ?? 0));
+    setLocalContribution(habit.today_contribution ?? 0);
+    setInputVal(String(habit.today_contribution ?? 0));
   }
 
   const hasProgress = habit.progress_metric != null && habit.progress_target != null;
@@ -62,7 +66,6 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
       else await uncompleteHabit(habit.id, today);
     };
     if (onToggle) {
-      // Delegate to parent so dispatch + server call run in one transition
       onToggle(habit.id, newDone, serverFn);
     } else {
       startTransition(serverFn);
@@ -71,7 +74,7 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
 
   function openProgressEditor(e: React.MouseEvent) {
     e.stopPropagation();
-    setInputVal(String(localProgress));
+    setInputVal(String(localContribution)); // pre-fill with today's contribution, not period total
     setProgressEditing(true);
     setTimeout(() => inputRef.current?.focus(), 30);
   }
@@ -80,20 +83,24 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
     e?.preventDefault();
     e?.stopPropagation();
     const raw = Math.max(
-      habit.progress_start ?? 0,
+      0,
       Math.min((habit.progress_target ?? 0) * 2, Number(inputVal) || 0)
     );
-    const val = Math.round(raw * 100) / 100;
-    const prevProgress = localProgress;
-    setLocalProgress(val);
+    const newContrib = Math.round(raw * 100) / 100;
+    // Optimistic: period total = old_total - old_contribution + new_contribution
+    const newPeriodTotal = localProgress - localContribution + newContrib;
+    setLocalProgress(newPeriodTotal);
+    setLocalContribution(newContrib);
     setProgressEditing(false);
-    const nowDone = habit.progress_target != null && val >= habit.progress_target;
+    const nowDone = habit.progress_target != null && newPeriodTotal >= habit.progress_target;
     onDoneChange?.(habit.id, nowDone);
     startTransition(async () => {
-      const result = await logHabitProgress(habit.id, today, habit.name, val);
+      const result = await logHabitProgress(habit.id, today, habit.name, newContrib);
       if (result?.error) {
-        setLocalProgress(prevProgress);
-        onDoneChange?.(habit.id, habit.progress_target != null && prevProgress >= habit.progress_target);
+        // Revert on error
+        setLocalProgress(habit.today_progress ?? 0);
+        setLocalContribution(habit.today_contribution ?? 0);
+        onDoneChange?.(habit.id, habit.progress_target != null && (habit.today_progress ?? 0) >= habit.progress_target);
       }
     });
   }
@@ -107,6 +114,8 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
       ? `${habit.completions_this_week}/${habit.target}`
       : null;
 
+  // Only show a time label for exact_time (e.g. "9:00 AM") — not for time_of_day
+  // since the parent section heading already says "Morning", "Evening", etc.
   const timeLabel = habit.exact_time
     ? (() => {
         const [h, m] = habit.exact_time.split(":").map(Number);
@@ -114,14 +123,14 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
         const hour = h % 12 || 12;
         return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
       })()
-    : habit.time_of_day
-    ? TIME_OF_DAY_LABEL[habit.time_of_day]
     : null;
 
   const progressRange = (habit.progress_target ?? 0) - (habit.progress_start ?? 0);
   const progressPct = progressRange > 0
     ? Math.min(100, ((localProgress - (habit.progress_start ?? 0)) / progressRange) * 100)
     : 0;
+
+  const periodLabel = PERIOD_LABELS[habit.progress_period ?? "daily"] ?? "today";
 
   return (
     <div
@@ -130,7 +139,6 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
         config.cardClass,
         isPending && "opacity-70"
       )}
-      style={{ borderLeftWidth: "4px", borderLeftColor: habit.color }}
     >
       <div className="flex items-center gap-3">
         {/* Circle checkbox (non-progress habits only) */}
@@ -153,10 +161,9 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
           </button>
         )}
 
-        {/* Icon + name */}
+        {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-base leading-none">{habit.icon}</span>
             <span className={cn("font-semibold text-sm", effectiveDone && "line-through text-muted-foreground")}>
               {habit.name}
             </span>
@@ -220,6 +227,9 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
               {localProgress} / {habit.progress_target} {habit.progress_metric}
+              {habit.progress_period && habit.progress_period !== "daily" && (
+                <span className="ml-1 opacity-70">{periodLabel}</span>
+              )}
             </span>
             {isProgressDone && (
               <span className="text-xs text-emerald-600 font-medium">Done ✓</span>
@@ -246,10 +256,12 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Escape") setProgressEditing(false); }}
             step="0.01"
-            min={habit.progress_start ?? 0}
+            min={0}
             className="w-24 text-sm border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          <span className="text-xs text-muted-foreground flex-1">/ {habit.progress_target} {habit.progress_metric}</span>
+          <span className="text-xs text-muted-foreground flex-1">
+            {habit.progress_metric} today
+          </span>
           <button
             type="button"
             onClick={() => setProgressEditing(false)}

@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events";
 import type { AppEvent } from "@/lib/notion/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
@@ -53,9 +55,19 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   const [isPending, startTransition] = useTransition();
   const [deleteMode, setDeleteMode] = useState<"none" | "confirm_single" | "prompt_recurring">("none");
   const [error, setError] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(true);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   // Shared fields
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
 
   // Timed-specific
   const [eventDate, setEventDate] = useState("");
@@ -75,6 +87,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   function resetToEvent(e: AppEvent | null) {
     if (!e) return;
     setTitle(e.title);
+    setDescription(e.description ?? "");
     setError(null);
     setDeleteMode("none");
 
@@ -106,6 +119,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
 
     const data: Parameters<typeof updateEvent>[1] = {
       title,
+      description: description || undefined,
     };
 
     if (event.event_type === "timed") {
@@ -121,6 +135,8 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
       data.due_time = deadlineTime || null;
       data.surface_days = Number(surfaceDays);
     }
+
+    if (event.id.startsWith("temp-")) return;
 
     startTransition(async () => {
       if (dispatchEvent) {
@@ -173,22 +189,10 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     : event?.event_type === "all_day" ? "📋"
     : "⏰";
 
-  return (
-    <Sheet
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) resetToEvent(event);
-        onOpenChange(o);
-      }}
-    >
-      <SheetContent side="bottom" className="h-auto max-h-[85vh] overflow-y-auto rounded-t-3xl px-4 md:px-8 pb-10">
-        <SheetHeader className="mb-5">
-          <SheetTitle className="flex items-center gap-2">
-            <span>{typeIcon}</span>
-            <span>Edit {typeLabel}</span>
-          </SheetTitle>
-        </SheetHeader>
+  const handleOpenChange = (o: boolean) => { if (!o) resetToEvent(event); onOpenChange(o); };
 
+  const formContent = (
+    <>
         {error && <p className="text-sm text-destructive mb-3">{error}</p>}
 
         <form onSubmit={handleSave} className="space-y-5">
@@ -201,6 +205,17 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Event title"
               required
+            />
+          </div>
+
+          {/* Description */}
+          <div className="space-y-2">
+            <Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Any details…"
+              rows={2}
             />
           </div>
 
@@ -303,6 +318,35 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
             </button>
           )}
         </form>
+    </>
+  );
+
+  if (!isMobile) {
+    return (
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto px-6 pb-6">
+          <DialogHeader className="mb-5">
+            <DialogTitle className="flex items-center gap-2">
+              <span>{typeIcon}</span>
+              <span>Edit {typeLabel}</span>
+            </DialogTitle>
+          </DialogHeader>
+          {formContent}
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent side="bottom" className="h-auto max-h-[85vh] overflow-y-auto rounded-t-3xl px-4 pb-10">
+        <SheetHeader className="mb-5">
+          <SheetTitle className="flex items-center gap-2">
+            <span>{typeIcon}</span>
+            <span>Edit {typeLabel}</span>
+          </SheetTitle>
+        </SheetHeader>
+        {formContent}
       </SheetContent>
     </Sheet>
   );

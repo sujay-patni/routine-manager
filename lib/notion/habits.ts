@@ -1,6 +1,6 @@
 import { notion, HABITS_DB, COMPLETIONS_DB } from "./client";
 import { getText, getSelect, getCheckbox, getDate, getRelationIds } from "./helpers";
-import type { Habit, Completion, HabitFrequency, TimeOfDay } from "./types";
+import type { Habit, Completion, HabitFrequency, TimeOfDay, ProgressPeriod } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -22,21 +22,28 @@ function pageToHabit(page: any): Habit {
     progress_metric: getText(props["Progress Metric"]) || null,
     progress_target: props["Progress Target"]?.number ?? null,
     progress_start: props["Progress Start"]?.number ?? null,
+    progress_period: (getSelect(props["Progress Period"]) as ProgressPeriod) || null,
+    sort_order: props["Sort Order"]?.number ?? null,
   };
 }
 
 async function queryWithBackoff(params: any): Promise<any> {
-  let retries = 3;
-  let delay = 1000;
+  let retries = 4;
+  let delay = 500;
   while (true) {
     try {
       return await notion.dataSources.query({ ...params, page_size: params.page_size || 50 });
     } catch (e: any) {
-      if (retries <= 0 || (e.status !== 503 && e.status !== 502 && !e.message?.includes("temporarily unavailable"))) {
-        throw e;
-      }
+      const msg: string = e?.message ?? String(e);
+      const isTransient =
+        e.status === 503 ||
+        e.status === 502 ||
+        e.status === 429 ||
+        msg.includes("temporarily unavailable") ||
+        msg.includes("Could not find database");
+      if (retries <= 0 || !isTransient) throw e;
       await new Promise((res) => setTimeout(res, delay));
-      delay *= 2;
+      delay = Math.min(delay * 2, 3000);
       retries--;
     }
   }
@@ -123,6 +130,13 @@ async function ensureCompletionProgressColumn(): Promise<void> {
   await (notion.dataSources as any).update({
     data_source_id: COMPLETIONS_DB,
     properties: { "Progress Value": { number: {} } },
+  });
+}
+
+export async function ensureHabitSortOrderColumn(): Promise<void> {
+  await (notion.dataSources as any).update({
+    data_source_id: HABITS_DB,
+    properties: { "Sort Order": { number: {} } },
   });
 }
 
@@ -236,22 +250,24 @@ export async function createHabit(data: {
   description?: string;
   frequency: HabitFrequency;
   weekly_target?: number;
-  color: string;
-  icon: string;
+  color?: string;
+  icon?: string;
   time_of_day?: string;
   exact_time?: string;
   specific_days?: string;
   progress_metric?: string;
   progress_target?: number;
   progress_start?: number;
+  progress_period?: string;
+  sort_order?: number;
 }): Promise<Habit> {
   const props: any = {
     Name: { title: [{ text: { content: data.name } }] },
     Description: { rich_text: data.description ? [{ text: { content: data.description } }] : [] },
     Frequency: { select: { name: data.frequency } },
     "Weekly Target": data.weekly_target != null ? { number: data.weekly_target } : { number: null },
-    Color: { select: { name: data.color } },
-    Icon: { rich_text: [{ text: { content: data.icon } }] },
+    Color: { select: { name: data.color ?? "#6366f1" } },
+    Icon: { rich_text: [{ text: { content: data.icon ?? "" } }] },
     Active: { checkbox: true },
   };
 
@@ -261,6 +277,8 @@ export async function createHabit(data: {
   if (data.progress_metric) props["Progress Metric"] = { rich_text: [{ text: { content: data.progress_metric } }] };
   if (data.progress_target != null) props["Progress Target"] = { number: data.progress_target };
   if (data.progress_start != null) props["Progress Start"] = { number: data.progress_start };
+  if (data.progress_period) props["Progress Period"] = { select: { name: data.progress_period } };
+  if (data.sort_order != null) props["Sort Order"] = { number: data.sort_order };
 
   const page = await notion.pages.create({
     parent: { data_source_id: HABITS_DB },
@@ -278,7 +296,7 @@ export async function updateHabit(
   id: string,
   data: Partial<{
     name: string;
-    description: string;
+    description: string | null;
     frequency: HabitFrequency;
     weekly_target: number | null;
     color: string;
@@ -290,11 +308,13 @@ export async function updateHabit(
     progress_metric: string | null;
     progress_target: number | null;
     progress_start: number | null;
+    progress_period: string | null;
+    sort_order: number | null;
   }>
 ): Promise<void> {
   const props: Record<string, any> = {};
   if (data.name !== undefined) props["Name"] = { title: [{ text: { content: data.name } }] };
-  if (data.description !== undefined) props["Description"] = { rich_text: [{ text: { content: data.description } }] };
+  if (data.description !== undefined) props["Description"] = { rich_text: data.description ? [{ text: { content: data.description } }] : [] };
   if (data.frequency !== undefined) props["Frequency"] = { select: { name: data.frequency } };
   if (data.weekly_target !== undefined) props["Weekly Target"] = { number: data.weekly_target };
   if (data.color !== undefined) props["Color"] = { select: { name: data.color } };
@@ -306,6 +326,8 @@ export async function updateHabit(
   if (data.progress_metric !== undefined) props["Progress Metric"] = { rich_text: data.progress_metric ? [{ text: { content: data.progress_metric } }] : [] };
   if (data.progress_target !== undefined) props["Progress Target"] = { number: data.progress_target };
   if (data.progress_start !== undefined) props["Progress Start"] = { number: data.progress_start };
+  if (data.progress_period !== undefined) props["Progress Period"] = data.progress_period ? { select: { name: data.progress_period } } : { select: null };
+  if (data.sort_order !== undefined) props["Sort Order"] = { number: data.sort_order };
 
   await notion.pages.update({ page_id: id, properties: props });
 }

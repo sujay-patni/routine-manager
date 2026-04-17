@@ -58,7 +58,17 @@ export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
   }
   const todayStr = formatDateForDB(targetDate);
 
-  const allEvents = await getAllEventsIncludingCompleted();
+  let allEvents: AppEvent[];
+  try {
+    allEvents = await getAllEventsIncludingCompleted();
+  } catch (e: unknown) {
+    const msg = String(e);
+    if (msg.includes("Could not find database") || msg.includes("not shared")) {
+      console.error("Events DB inaccessible:", msg);
+      return [];
+    }
+    throw e;
+  }
   const todayEvents: TodayEvent[] = [];
 
   for (const event of allEvents) {

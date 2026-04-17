@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,13 +16,6 @@ import { cn } from "@/lib/utils";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
-
-const COLORS = [
-  "#6366f1", "#f43f5e", "#10b981", "#f59e0b", "#3b82f6",
-  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#06b6d4",
-];
-
-const ICONS = ["✨", "💪", "🏃", "📚", "🧘", "💻", "🎯", "🌱", "🎵", "✍️", "🥗", "💤", "🚴", "🏋️", "🧠"];
 
 const DAYS_OF_WEEK = [
   { abbr: "MO", label: "Mon" },
@@ -85,14 +79,21 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(true);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   // — Habit state —
   const [habitName, setHabitName] = useState("");
   const [habitDesc, setHabitDesc] = useState("");
   const [habitFreq, setHabitFreq] = useState<HabitFrequency>("daily");
   const [habitTarget, setHabitTarget] = useState(3);
-  const [habitColor, setHabitColor] = useState(COLORS[0]);
-  const [habitIcon, setHabitIcon] = useState(ICONS[0]);
   const [habitTimeOfDay, setHabitTimeOfDay] = useState("");
   const [habitExactTime, setHabitExactTime] = useState("");
   const [habitShowExact, setHabitShowExact] = useState(false);
@@ -106,6 +107,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [habitMetric, setHabitMetric] = useState("");
   const [habitTarget2, setHabitTarget2] = useState("");
   const [habitStart, setHabitStart] = useState("0");
+  const [habitProgressPeriod, setHabitProgressPeriod] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
 
   // — Event/Task/Deadline state —
   const [eventTitle, setEventTitle] = useState("");
@@ -136,11 +138,11 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
 
   function resetForms() {
     setHabitName(""); setHabitDesc(""); setHabitFreq("daily"); setHabitTarget(3);
-    setHabitColor(COLORS[0]); setHabitIcon(ICONS[0]);
     setHabitTimeOfDay(""); setHabitExactTime(""); setHabitShowExact(false);
     setHabitDays([]); setHabitDates([]);
     setHabitYearlyDates([{ month: "01", day: "01" }]);
     setHabitProgressOn(false); setHabitMetric(""); setHabitTarget2(""); setHabitStart("0");
+    setHabitProgressPeriod("daily");
     setEventTitle(""); setEventDesc(""); setEventDate(baseDate()); setEventTime("09:00");
     setEventEndTime(""); setDueDate(baseDate()); setDueTime("");
     setSurfaceDays(3); setRecurrence("none"); setEventDays([]);
@@ -217,14 +219,13 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       description: habitDesc || undefined,
       frequency: habitFreq,
       weekly_target: habitFreq === "weekly" && !habitProgressOn ? habitTarget : undefined,
-      color: habitColor,
-      icon: habitIcon,
       time_of_day: habitShowExact ? undefined : habitTimeOfDay || undefined,
       exact_time: habitShowExact ? habitExactTime || undefined : undefined,
       specific_days: getHabitSpecificDays(),
       progress_metric: habitProgressOn ? habitMetric || undefined : undefined,
       progress_target: habitProgressOn && habitTarget2 ? Number(habitTarget2) : undefined,
       progress_start: habitProgressOn ? Number(habitStart) : undefined,
+      progress_period: habitProgressOn ? habitProgressPeriod : undefined,
     };
     
     startTransition(async () => {
@@ -235,9 +236,16 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
             ...payload,
             id: "temp-habit-" + Date.now(),
             created_at: new Date().toISOString(),
+            color: "#6366f1",
+            icon: "",
             is_active: true,
             completed_today: 0,
             completions_this_week: 0,
+            today_progress: null,
+            today_contribution: null,
+            week_progress: null,
+            today_completion_id: null,
+            sort_order: null,
             target: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
             remaining: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
             daysLeftInWeek: 7,
@@ -344,13 +352,10 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     onOpenChange(false);
   }
 
-  return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) resetForms(); onOpenChange(o); }}>
-      <SheetContent side="bottom" className="h-[92vh] overflow-y-auto rounded-t-3xl px-4 md:px-8 pb-10">
-          <SheetHeader className="mb-4">
-            <SheetTitle>Add to your routine</SheetTitle>
-          </SheetHeader>
+  const handleOpenChange = (o: boolean) => { if (!o) resetForms(); onOpenChange(o); };
 
+  const innerContent = (
+    <>
           {error && <p className="text-sm text-destructive mb-3">{error}</p>}
           {warning && (
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-400 mb-3">
@@ -403,28 +408,42 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                     </button>
                   </div>
                   {habitProgressOn && (
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="col-span-1 space-y-1">
-                        <Label className="text-xs">Start</Label>
-                        <Input type="number" min={0} value={habitStart} onChange={e => {
-                          let val = parseInt(e.target.value, 10);
-                          if (isNaN(val) || val < 0) val = 0;
-                          setHabitStart(String(val));
-                        }} placeholder="0" />
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="col-span-1 space-y-1">
+                          <Label className="text-xs">Start</Label>
+                          <Input type="number" min={0} value={habitStart} onChange={e => {
+                            let val = parseInt(e.target.value, 10);
+                            if (isNaN(val) || val < 0) val = 0;
+                            setHabitStart(String(val));
+                          }} placeholder="0" />
+                        </div>
+                        <div className="col-span-1 space-y-1">
+                          <Label className="text-xs">Target</Label>
+                          <Input type="number" min={1} value={habitTarget2} onChange={e => {
+                            let val = parseInt(e.target.value, 10);
+                            if (isNaN(val) || val < 1) val = 1;
+                            setHabitTarget2(String(val));
+                          }} placeholder="10000" />
+                        </div>
+                        <div className="col-span-1 space-y-1">
+                          <Label className="text-xs">Unit</Label>
+                          <Input value={habitMetric} onChange={e => setHabitMetric(e.target.value)} placeholder="steps" />
+                        </div>
                       </div>
-                      <div className="col-span-1 space-y-1">
-                        <Label className="text-xs">Target</Label>
-                        <Input type="number" min={1} value={habitTarget2} onChange={e => {
-                          let val = parseInt(e.target.value, 10);
-                          if (isNaN(val) || val < 1) val = 1;
-                          setHabitTarget2(String(val));
-                        }} placeholder="10000" />
+                      <div className="space-y-1">
+                        <Label className="text-xs">Progress resets</Label>
+                        <Select value={habitProgressPeriod} onValueChange={v => v && setHabitProgressPeriod(v as typeof habitProgressPeriod)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="daily">Daily</SelectItem>
+                            <SelectItem value="weekly">Weekly (Mon–Sun)</SelectItem>
+                            <SelectItem value="monthly">Monthly (1st of month)</SelectItem>
+                            <SelectItem value="yearly">Yearly (Jan 1)</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
-                      <div className="col-span-1 space-y-1">
-                        <Label className="text-xs">Unit</Label>
-                        <Input value={habitMetric} onChange={e => setHabitMetric(e.target.value)} placeholder="steps" />
-                      </div>
-                    </div>
+                    </>
                   )}
                 </div>
 
@@ -591,30 +610,6 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                       </SelectContent>
                     </Select>
                   )}
-                </div>
-
-                {/* Icon + Color */}
-                <div className="space-y-2">
-                  <Label>Icon</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {ICONS.map(ic => (
-                      <button key={ic} type="button" onClick={() => setHabitIcon(ic)}
-                        className={`text-xl p-1.5 rounded-xl border-2 transition-all ${habitIcon === ic ? "border-primary bg-accent" : "border-transparent"}`}>
-                        {ic}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Color</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {COLORS.map(c => (
-                      <button key={c} type="button" onClick={() => setHabitColor(c)}
-                        style={{ backgroundColor: c }}
-                        className={`w-8 h-8 rounded-full border-4 transition-all ${habitColor === c ? "border-foreground scale-110" : "border-transparent"}`} />
-                    ))}
-                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -832,6 +827,29 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
               </form>
             </TabsContent>
           </Tabs>
+    </>
+  );
+
+  if (!isMobile) {
+    return (
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto px-6 pb-6">
+          <DialogHeader className="mb-4">
+            <DialogTitle>Add to your routine</DialogTitle>
+          </DialogHeader>
+          {innerContent}
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent side="bottom" className="h-auto max-h-[90vh] overflow-y-auto rounded-t-3xl px-4 pb-10">
+        <SheetHeader className="mb-4">
+          <SheetTitle>Add to your routine</SheetTitle>
+        </SheetHeader>
+        {innerContent}
       </SheetContent>
     </Sheet>
   );
