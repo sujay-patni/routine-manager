@@ -30,7 +30,8 @@ const DAY_ABBREVS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 export interface HabitWithCounts extends Habit {
   completions_this_week: number;
   completed_today: number;
-  today_progress: number | null;
+  today_progress: number | null;       // period total (for display/completion check)
+  today_contribution: number | null;   // today's individual logged value (for editing)
   week_progress: number | null;
   today_completion_id: string | null;
   completions_by_date?: string[];

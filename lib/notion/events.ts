@@ -24,17 +24,22 @@ function pageToEvent(page: any): AppEvent {
 }
 
 async function queryWithBackoff(params: any): Promise<any> {
-  let retries = 3;
-  let delay = 1000;
+  let retries = 4;
+  let delay = 500;
   while (true) {
     try {
       return await notion.dataSources.query({ ...params, page_size: params.page_size || 50 });
     } catch (e: any) {
-      if (retries <= 0 || (e.status !== 503 && e.status !== 502 && !e.message?.includes("temporarily unavailable"))) {
-        throw e;
-      }
+      const msg: string = e?.message ?? String(e);
+      const isTransient =
+        e.status === 503 ||
+        e.status === 502 ||
+        e.status === 429 ||
+        msg.includes("temporarily unavailable") ||
+        msg.includes("Could not find database");
+      if (retries <= 0 || !isTransient) throw e;
       await new Promise((res) => setTimeout(res, delay));
-      delay *= 2;
+      delay = Math.min(delay * 2, 3000);
       retries--;
     }
   }

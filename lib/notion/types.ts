@@ -5,6 +5,7 @@ export type HabitFrequency =
   | "specific_days_weekly"
   | "specific_dates_monthly"
   | "specific_dates_yearly";
+export type ProgressPeriod = "daily" | "weekly" | "monthly" | "yearly";
 
 export interface Habit {
   id: string;
@@ -24,6 +25,9 @@ export interface Habit {
   progress_metric: string | null; // e.g. "steps"
   progress_target: number | null; // e.g. 10000
   progress_start: number | null;  // e.g. 0
+  progress_period: ProgressPeriod | null; // "daily" | "weekly" | "monthly" | "yearly"
+  // display
+  sort_order: number | null;
 }
 
 export interface Completion {
