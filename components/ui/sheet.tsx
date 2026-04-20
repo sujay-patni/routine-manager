@@ -80,13 +80,20 @@ function SheetContent({
   )
 }
 
-function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
+function SheetHeader({ className, showHandle = false, children, ...props }: React.ComponentProps<"div"> & { showHandle?: boolean }) {
   return (
     <div
       data-slot="sheet-header"
       className={cn("flex flex-col gap-0.5 p-4", className)}
       {...props}
-    />
+    >
+      {showHandle && (
+        <div className="flex justify-center -mt-1 mb-2">
+          <div className="w-10 h-1 rounded-full bg-border" />
+        </div>
+      )}
+      {children}
+    </div>
   )
 }
 
@@ -105,7 +112,7 @@ function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
     <SheetPrimitive.Title
       data-slot="sheet-title"
       className={cn(
-        "font-heading text-base font-medium text-foreground",
+        "font-fraunces font-normal text-[22px] tracking-tight text-foreground",
         className
       )}
       {...props}
