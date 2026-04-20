@@ -14,8 +14,8 @@ export default function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur border-t safe-bottom">
-      <div className="flex max-w-lg mx-auto">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-background/92 backdrop-blur border-t safe-bottom">
+      <div className="grid grid-cols-3 max-w-lg mx-auto px-2.5 py-2 pb-[22px]">
         {navItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "?");
           return (
@@ -23,12 +23,12 @@ export default function BottomNav() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs transition-colors",
+                "flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl transition-colors",
                 active ? "text-primary" : "text-muted-foreground"
               )}
             >
-              <span className="text-lg leading-none">{item.icon}</span>
-              <span className={cn("font-medium", active && "font-semibold")}>{item.label}</span>
+              <span className={cn("text-xl leading-none", !active && "opacity-85 saturate-[.4]")}>{item.icon}</span>
+              <span className={cn("text-[10px] tracking-[.04em]", active ? "font-semibold" : "font-medium")}>{item.label}</span>
             </Link>
           );
         })}

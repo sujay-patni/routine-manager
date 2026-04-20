@@ -846,7 +846,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="bottom" className="h-auto max-h-[90vh] overflow-y-auto rounded-t-3xl px-4 pb-10">
-        <SheetHeader className="mb-4">
+        <SheetHeader className="mb-4" showHandle>
           <SheetTitle>Add to your routine</SheetTitle>
         </SheetHeader>
         {innerContent}

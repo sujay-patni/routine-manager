@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
-  eachDayOfInterval, format, isSameMonth, isSameDay,
+  eachDayOfInterval, format, isSameMonth, isSameDay, isSameWeek, isSameYear,
   addMonths, addWeeks, addDays,
   addYears, isToday,
   getMonth, getYear, parseISO,
@@ -531,7 +531,10 @@ export default function CalendarClient({ events, weekStartDay, timezone }: Props
           );
           return (
             <div key={ds} className="px-4 py-3">
-              <p className="text-sm font-semibold mb-2">{format(parseISO(ds), "EEEE, MMMM d")}</p>
+              <div className="flex items-baseline gap-2 mb-2">
+                <span className="font-fraunces font-normal text-[18px]">{format(parseISO(ds), "EEEE")}</span>
+                <span className="text-[11px] text-muted-foreground tracking-[.1em] uppercase">{format(parseISO(ds), "MMMM d")}</span>
+              </div>
               <div className="space-y-1.5">
                 {dayEvents.map((e) => (
                   <button
@@ -563,70 +566,72 @@ export default function CalendarClient({ events, weekStartDay, timezone }: Props
 
   const showNav = view !== "schedule";
 
+  const _today = new Date();
+  const isOnToday =
+    view === "month"    ? isSameMonth(currentDate, _today) :
+    view === "week"     ? isSameWeek(currentDate, _today, { weekStartsOn: weekStartDay as 0 | 1 }) :
+    view === "year"     ? isSameYear(currentDate, _today) :
+    view === "day"      ? isToday(currentDate) :
+    true;
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b px-4 py-3 flex-shrink-0">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
           {/* Left: nav + title */}
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-1 min-w-0">
             {showNav && (
-              <>
-                <button
-                  onClick={() => navigate("prev")}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted transition-colors text-muted-foreground text-lg"
-                >
-                  ‹
-                </button>
-                <button
-                  onClick={() => setCurrentDate(new Date())}
-                  className="text-xs text-primary font-medium px-2 py-1 rounded-lg hover:bg-accent transition-colors whitespace-nowrap"
-                >
-                  Today
-                </button>
-                <button
-                  onClick={() => navigate("next")}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted transition-colors text-muted-foreground text-lg"
-                >
-                  ›
-                </button>
-              </>
+              <button
+                onClick={() => navigate("prev")}
+                className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                aria-label="Previous"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
             )}
-            <h1 className="text-base font-bold truncate">{headerLabel()}</h1>
+            <div className="px-1">
+              <div className="font-fraunces font-normal text-[22px] tracking-tight leading-tight">
+                {view === "month" || view === "week" ? format(currentDate, "MMMM") : view === "year" ? format(currentDate, "yyyy") : "Schedule"}
+              </div>
+              {(view === "month" || view === "week") && (
+                isOnToday
+                  ? <div className="text-[11px] text-muted-foreground tracking-[.12em] uppercase">{format(currentDate, "yyyy")}</div>
+                  : <button onClick={() => setCurrentDate(new Date())} className="text-[11px] text-primary font-medium tracking-[.04em] hover:underline">Today</button>
+              )}
+              {view === "year" && !isOnToday && (
+                <button onClick={() => setCurrentDate(new Date())} className="text-[11px] text-primary font-medium tracking-[.04em] hover:underline">Today</button>
+              )}
+            </div>
+            {showNav && (
+              <button
+                onClick={() => navigate("next")}
+                className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                aria-label="Next"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            )}
           </div>
 
           {/* Right: view selector + add */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* View dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setViewDropdownOpen((v) => !v)}
-                className="flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors"
-              >
-                {VIEW_LABELS[view]}
-                <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {viewDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setViewDropdownOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 bg-card border rounded-xl shadow-lg overflow-hidden z-50 min-w-[120px]">
-                    {(["day", "week", "month", "year", "schedule"] as CalendarView[]).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() => { setView(v); setViewDropdownOpen(false); }}
-                        className={cn(
-                          "w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors",
-                          view === v && "font-semibold text-primary"
-                        )}
-                      >
-                        {VIEW_LABELS[v]}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+            {/* View segmented control */}
+            <div className="flex bg-muted rounded-xl p-0.5 gap-0.5">
+              {(["month", "week", "year", "schedule"] as CalendarView[]).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-[10px] text-[11px] font-medium transition-all",
+                    view === v
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {VIEW_LABELS[v]}
+                </button>
+              ))}
             </div>
             {/* Add dropdown */}
             <div ref={addDropdownRef} className="relative">
@@ -679,8 +684,11 @@ export default function CalendarClient({ events, weekStartDay, timezone }: Props
       {/* Day detail sheet (month view click) */}
       <Sheet open={!!selectedDay && view === "month"} onOpenChange={(o) => { if (!o) setSelectedDay(null); }}>
         <SheetContent side="bottom" className="h-auto max-h-[80vh] overflow-y-auto rounded-t-3xl px-5 md:px-8 pb-10">
+          <div className="flex justify-center pt-2 pb-1">
+            <div className="w-10 h-1 rounded-full bg-border" />
+          </div>
           <SheetHeader className="mb-6 pt-2">
-            <SheetTitle className="text-xl font-bold">
+            <SheetTitle className="font-fraunces font-normal text-[22px] tracking-tight">
               {selectedDay ? format(selectedDay, "EEEE, MMMM d") : ""}
             </SheetTitle>
           </SheetHeader>
