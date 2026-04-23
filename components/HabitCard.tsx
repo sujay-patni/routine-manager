@@ -14,6 +14,7 @@ interface HabitCardProps {
   onDoneChange?: (id: string, done: boolean) => void;
   onToggle?: (id: string, done: boolean, serverFn: () => Promise<void>) => void;
   onEdit?: () => void;
+  onView?: () => void;
 }
 
 const PERIOD_LABELS: Record<string, string> = {
@@ -31,7 +32,7 @@ const stateConfig = {
   satisfied: { badge: { label: "week done ✓", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300" }, cardClass: "opacity-65", checkClass: "" },
 };
 
-export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit }: HabitCardProps) {
+export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit, onView }: HabitCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
   // Period total (for display in progress bar)
@@ -134,17 +135,19 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
 
   return (
     <div
+      onClick={onView}
       className={cn(
         "w-full flex flex-col gap-0 p-4 rounded-2xl border bg-card card-elevated text-left transition-all",
         config.cardClass,
-        isPending && "opacity-70"
+        isPending && "opacity-70",
+        onView && "cursor-pointer"
       )}
     >
       <div className="flex items-center gap-3">
         {/* Circle checkbox (non-progress habits only) */}
         {!hasProgress && (
           <button
-            onClick={toggle}
+            onClick={(e) => { e.stopPropagation(); toggle(); }}
             disabled={isPending}
             className={cn(
               "w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",

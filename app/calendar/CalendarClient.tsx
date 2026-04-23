@@ -15,13 +15,12 @@ import AddItemSheet from "@/components/AddItemSheet";
 import EditEventSheet from "@/components/EditEventSheet";
 import type { AppEvent } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/components/SettingsProvider";
 
 type CalendarView = "day" | "week" | "month" | "year" | "schedule";
 
 interface Props {
   events: AppEvent[];
-  weekStartDay: number;
-  timezone: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,7 +87,8 @@ function eventIcon(event: AppEvent): string {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function CalendarClient({ events, weekStartDay, timezone }: Props) {
+export default function CalendarClient({ events }: Props) {
+  const { timezone, week_start_day: weekStartDay } = useSettings();
   const [view, setView] = useState<CalendarView>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewDropdownOpen, setViewDropdownOpen] = useState(false);

@@ -7,6 +7,8 @@ import EventCard from "@/components/EventCard";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditHabitSheet from "@/components/EditHabitSheet";
 import EditEventSheet from "@/components/EditEventSheet";
+import HabitDetailSheet from "@/components/HabitDetailSheet";
+import EventDetailSheet from "@/components/EventDetailSheet";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
 import type { AppEvent } from "@/lib/notion/types";
@@ -147,6 +149,28 @@ export default function TodayClient({
 
   const [, startHabitTransition] = useTransition();
 
+  // Debounce queue: habitId → pending write + transition resolver
+  const pendingWrites = useRef<Map<string, { serverFn: () => Promise<void>; resolve: () => void }>>(new Map());
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPendingWrites = useCallback(async () => {
+    const entries = [...pendingWrites.current.values()];
+    pendingWrites.current.clear();
+    flushTimerRef.current = null;
+    if (entries.length === 0) return;
+    // Fire all queued writes in parallel, then resolve their transitions together.
+    await Promise.all(entries.map(e => e.serverFn()));
+    entries.forEach(e => e.resolve());
+  }, []);
+
+  // Flush any remaining writes when navigating away.
+  useEffect(() => () => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushPendingWrites();
+    }
+  }, [flushPendingWrites]);
+
   function handleHabitToggle(id: string, done: boolean, serverFn: () => Promise<void>) {
     handleDoneChange(id, done);
     const h = optHabits.find(h => h.id === id) as HabitWithDates | undefined;
@@ -156,6 +180,14 @@ export default function TodayClient({
       ? [...byDate, dateStr]
       : byDate.filter((d: string) => d !== dateStr);
     const delta = done ? 1 : -1;
+
+    // If this habit already has a write queued, cancel it (retoggle within the window).
+    const existing = pendingWrites.current.get(id);
+    if (existing) {
+      existing.resolve();
+      pendingWrites.current.delete(id);
+    }
+
     startHabitTransition(async () => {
       dispatchHabit({
         action: "update",
@@ -166,9 +198,13 @@ export default function TodayClient({
           completions_by_date: newByDate,
         },
       });
-      // Await the actual Notion write: keeps this transition pending so
-      // useOptimistic doesn't revert before Notion confirms the change.
-      await serverFn();
+      // Keep this transition alive until the debounce flush resolves it.
+      // Multiple habits tapped within 800ms share one flush → one round of parallel writes.
+      await new Promise<void>((resolve) => {
+        pendingWrites.current.set(id, { serverFn, resolve });
+        if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = setTimeout(flushPendingWrites, 800);
+      });
     });
   }
 
@@ -199,6 +235,10 @@ export default function TodayClient({
   // — Inline editing —
   const [editHabit, setEditHabit] = useState<ProcessedHabit | null>(null);
   const [editEvent, setEditEvent] = useState<TodayEvent | null>(null);
+
+  // — Detail views —
+  const [viewHabit, setViewHabit] = useState<ProcessedHabit | null>(null);
+  const [viewEvent, setViewEvent] = useState<TodayEvent | null>(null);
 
   const navigate = useCallback((direction: "prev" | "next") => {
     const base = parseISO(dateStr);
@@ -324,6 +364,18 @@ export default function TodayClient({
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="15 18 9 12 15 6"/></svg>
                 </button>
                 <button
+                  onClick={() => dateInputRef.current?.showPicker()}
+                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  aria-label="Pick a date"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </button>
+                <button
                   onClick={() => navigate("next")}
                   className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
                   aria-label="Next day"
@@ -347,7 +399,6 @@ export default function TodayClient({
             value={dateStr}
             onChange={(e) => navigateToDate(e.target.value)}
             className="sr-only"
-            aria-hidden="true"
             tabIndex={-1}
           />
         </div>
@@ -418,6 +469,7 @@ export default function TodayClient({
                       onDoneChange={handleDoneChange}
                       onToggle={handleHabitToggle}
                       onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
+                      onView={() => setViewHabit(entry.item as ProcessedHabit)}
                     />
                   ) : (
                     <EventCard
@@ -425,6 +477,7 @@ export default function TodayClient({
                       event={entry.item as TodayEvent}
                       onDoneChange={handleDoneChange}
                       onEdit={() => setEditEvent(entry.item as TodayEvent)}
+                      onView={() => setViewEvent(entry.item as TodayEvent)}
                     />
                   )
                 )}
@@ -455,6 +508,7 @@ export default function TodayClient({
                       onDoneChange={handleDoneChange}
                       onToggle={handleHabitToggle}
                       onEdit={() => setEditHabit(entry.item)}
+                      onView={() => setViewHabit(entry.item)}
                     />
                   ) : (
                     <EventCard
@@ -462,6 +516,7 @@ export default function TodayClient({
                       event={entry.item}
                       onDoneChange={handleDoneChange}
                       onEdit={() => setEditEvent(entry.item)}
+                      onView={() => setViewEvent(entry.item)}
                     />
                   )
                 )
@@ -483,6 +538,7 @@ export default function TodayClient({
                   onDoneChange={handleDoneChange}
                   onToggle={handleHabitToggle}
                   onEdit={() => setEditHabit(h)}
+                  onView={() => setViewHabit(h)}
                 />
               ))}
             </div>
@@ -607,10 +663,10 @@ export default function TodayClient({
       </div>
 
       {/* Sheets */}
-      <AddItemSheet 
-        open={sheetOpen} 
-        onOpenChange={setSheetOpen} 
-        defaultTab={sheetTab} 
+      <AddItemSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        defaultTab={sheetTab}
         dispatchHabit={dispatchHabit}
         dispatchEvent={dispatchEvent}
       />
@@ -625,6 +681,18 @@ export default function TodayClient({
         open={!!editEvent}
         onOpenChange={(o) => { if (!o) setEditEvent(null); }}
         dispatchEvent={dispatchEvent}
+      />
+      <HabitDetailSheet
+        habit={viewHabit}
+        open={!!viewHabit}
+        onOpenChange={(o) => { if (!o) setViewHabit(null); }}
+        onEdit={() => { setEditHabit(viewHabit); setViewHabit(null); }}
+      />
+      <EventDetailSheet
+        event={viewEvent as AppEvent | null}
+        open={!!viewEvent}
+        onOpenChange={(o) => { if (!o) setViewEvent(null); }}
+        onEdit={() => { setEditEvent(viewEvent); setViewEvent(null); }}
       />
     </div>
   );

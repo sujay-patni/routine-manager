@@ -11,8 +11,8 @@ import { updateHabit, getAllHabits, reorderHabits } from "@/app/actions/habits";
 import { saveSettings } from "@/app/actions/settings";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditHabitSheet from "@/components/EditHabitSheet";
+import { useSettings } from "@/components/SettingsProvider";
 import type { Habit } from "@/lib/notion/types";
-import type { AppSettings } from "@/app/actions/settings";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
 
@@ -64,13 +64,13 @@ function getHabitSection(habit: Habit): SectionKey {
 }
 
 interface Props {
-  settings: AppSettings;
   habits: Habit[];
   notionHabitsUrl?: string;
   notionEventsUrl?: string;
 }
 
-export default function SettingsClient({ settings, habits: initialHabits, notionHabitsUrl, notionEventsUrl }: Props) {
+export default function SettingsClient({ habits: initialHabits, notionHabitsUrl, notionEventsUrl }: Props) {
+  const settings = useSettings();
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [addHabitOpen, setAddHabitOpen] = useState(false);

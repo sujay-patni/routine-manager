@@ -3,6 +3,8 @@ import { Geist, Fraunces } from "next/font/google";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import Sidebar from "@/components/Sidebar";
+import { SettingsProvider } from "@/components/SettingsProvider";
+import { getSettings } from "@/app/actions/settings";
 
 const geist = Geist({
   variable: "--font-geist-sans",
@@ -34,11 +36,13 @@ export const viewport: Viewport = {
   themeColor: "#8b5cf6",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const settings = await getSettings();
+
   return (
     <html lang="en" className={`${geist.variable} ${fraunces.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
@@ -51,12 +55,14 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex bg-background">
-        <Sidebar />
-        {/* Main content — offset on desktop to clear sidebar */}
-        <div className="flex flex-col flex-1 min-w-0 lg:pl-56">
-          {children}
-        </div>
-        <BottomNav />
+        <SettingsProvider settings={settings}>
+          <Sidebar />
+          {/* Main content — offset on desktop to clear sidebar */}
+          <div className="flex flex-col flex-1 min-w-0 lg:pl-56">
+            {children}
+          </div>
+          <BottomNav />
+        </SettingsProvider>
       </body>
     </html>
   );

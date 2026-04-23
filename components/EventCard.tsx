@@ -10,6 +10,7 @@ interface EventCardProps {
   event: TodayEvent;
   onDoneChange?: (id: string, done: boolean) => void;
   onEdit?: () => void;
+  onView?: () => void;
 }
 
 const TIME_OF_DAY_LABEL: Record<string, string> = {
@@ -37,7 +38,7 @@ function formatTime(timeStr: string | null): string {
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-export default function EventCard({ event, onDoneChange, onEdit }: EventCardProps) {
+export default function EventCard({ event, onDoneChange, onEdit, onView }: EventCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(event.is_completed);
 
@@ -87,18 +88,20 @@ export default function EventCard({ event, onDoneChange, onEdit }: EventCardProp
 
   return (
     <div
+      onClick={onView}
       className={cn(
         "flex flex-col gap-0 p-4 rounded-2xl border bg-card card-elevated transition-all",
         localDone && "opacity-50",
         isDeadline && event.isOverdue && "border-red-200 bg-red-50/40 dark:border-red-900 dark:bg-red-950/20",
         isDeadline && !event.isOverdue && event.daysUntilDue === 0 && "border-orange-200 dark:border-orange-900",
-        isPending && "opacity-70"
+        isPending && "opacity-70",
+        onView && "cursor-pointer"
       )}
     >
       <div className="flex items-start gap-3">
         {/* Complete button */}
         <button
-          onClick={toggleComplete}
+          onClick={(e) => { e.stopPropagation(); toggleComplete(); }}
           disabled={isPending}
           className={cn(
             "mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
