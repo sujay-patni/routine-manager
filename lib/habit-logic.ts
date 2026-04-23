@@ -6,6 +6,7 @@ import {
   differenceInDays,
   parseISO,
   format,
+  subDays,
 } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import type { Habit } from "./notion/types";
@@ -45,12 +46,23 @@ export interface ProcessedHabit extends HabitWithCounts {
   daysLeftInWeek: number;
 }
 
+/** Returns the current date adjusted by the custom day-start hour.
+ *  If the current time in the user's timezone is before dayStartHour, the
+ *  effective date is yesterday — the habit day hasn't turned over yet. */
+export function getEffectiveDate(timezone: string, dayStartHour: number): Date {
+  const zonedNow = toZonedTime(new Date(), timezone);
+  if (dayStartHour > 0 && zonedNow.getHours() < dayStartHour) {
+    return subDays(zonedNow, 1);
+  }
+  return zonedNow;
+}
+
 export function getWeekBoundaries(
   timezone: string,
-  weekStartDay: number = 1
+  weekStartDay: number = 1,
+  dayStartHour: number = 0
 ): { weekStart: Date; weekEnd: Date; today: Date } {
-  const now = new Date();
-  const zonedNow = toZonedTime(now, timezone);
+  const zonedNow = getEffectiveDate(timezone, dayStartHour);
 
   const weekStart =
     weekStartDay === 1

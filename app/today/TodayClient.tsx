@@ -24,6 +24,7 @@ interface Props {
   dayLabel: string;
   relativeLabel: string;
   dateStr: string;
+  isLateNight: boolean;
 }
 
 export type OptimisticAction<T> = { action: "add" | "update" | "delete"; item: T };
@@ -114,6 +115,7 @@ export default function TodayClient({
   dayLabel,
   relativeLabel,
   dateStr,
+  isLateNight,
 }: Props) {
   const [optHabits, dispatchHabit] = useOptimistic(
     habits,
@@ -244,21 +246,25 @@ export default function TodayClient({
     const base = parseISO(dateStr);
     const target = direction === "prev" ? subDays(base, 1) : addDays(base, 1);
     const newDate = format(target, "yyyy-MM-dd");
-    if (newDate === format(new Date(), "yyyy-MM-dd")) {
+    const realTodayStr = format(new Date(), "yyyy-MM-dd");
+    // When in late-night mode, navigating forward to the real calendar day should use
+    // an explicit date so the user sees real-date events, not the effective-date habits.
+    if (newDate === realTodayStr && !isLateNight) {
       router.push("/today");
     } else {
       router.push(`/today?date=${newDate}`);
     }
-  }, [dateStr, router]);
+  }, [dateStr, isLateNight, router]);
 
   const navigateToDate = useCallback((newDate: string) => {
     if (!newDate) return;
-    if (newDate === format(new Date(), "yyyy-MM-dd")) {
+    const realTodayStr = format(new Date(), "yyyy-MM-dd");
+    if (newDate === realTodayStr && !isLateNight) {
       router.push("/today");
     } else {
       router.push(`/today?date=${newDate}`);
     }
-  }, [router]);
+  }, [isLateNight, router]);
 
   const visibleEvents = optEvents;
   const visibleHabits = optHabits.filter((h) => h.show && h.state !== "satisfied");
@@ -269,7 +275,7 @@ export default function TodayClient({
     visibleEvents.filter((e) => doneOverrides.has(e.id) ? doneOverrides.get(e.id) : e.is_completed).length;
   const totalCount = optHabits.length + visibleEvents.length;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-  const isToday = dateStr === format(new Date(), "yyyy-MM-dd");
+  const isToday = isLateNight || dateStr === format(new Date(), "yyyy-MM-dd");
 
   // ── Bucket items into time sections ──────────────────────────────────────
   const habitsBySection = new Map<TimeKey, ProcessedHabit[]>();
@@ -407,12 +413,15 @@ export default function TodayClient({
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-6">
 
-        {/* Time-of-day sections */}
-        {TIME_SECTIONS.map(({ key, label, icon, range }) => {
-          const sHabits = habitsBySection.get(key) ?? [];
-          const sEvents = eventsBySection.get(key) ?? [];
-          if (sHabits.length === 0 && sEvents.length === 0) return null;
+        {isLateNight && (
+          <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground bg-muted/50 rounded-xl px-3 py-2.5">
+            <span>🌙</span>
+            <span>Late night — showing <strong>{dayLabel}</strong> habits. Your new day starts later.</span>
+          </div>
+        )}
 
+        {(() => {
+          // ── Section ordering ────────────────────────────────────────────────
           type Entry = {
             kind: "habit" | "event";
             item: ProcessedHabit | TodayEvent;
@@ -421,109 +430,145 @@ export default function TodayClient({
             timed: boolean;
           };
 
-          const entries: Entry[] = [
-            ...sHabits.map((h) => ({
-              kind: "habit" as const,
-              item: h,
-              sortKey: h.exact_time ? exactMinutes(h) : (h.sort_order ?? 9999),
-              done: h.completed_today > 0,
-              timed: !!h.exact_time,
-            })),
-            ...sEvents.map((e) => {
-              const m = eventMinutes(e);
-              return {
-                kind: "event" as const,
-                item: e,
-                sortKey: m >= 0 ? m : 9999,
-                done: e.is_completed,
-                timed: m >= 0,
-              };
-            }),
-          ];
+          const ALL_KEYS: TimeKey[] = ["morning", "afternoon", "evening", "night"];
+          const currentSectionKey = hourToSection(new Date().getHours());
+          const currentIdx = ALL_KEYS.indexOf(currentSectionKey);
+          const upcomingKeys = ALL_KEYS.slice(currentIdx);   // current + upcoming
+          const pastKeys     = ALL_KEYS.slice(0, currentIdx); // past sections
 
-          // Sort: untimed-notdone → timed-notdone → untimed-done → timed-done
-          // Within each group: by sortKey (sort_order for untimed, time for timed)
-          entries.sort((a, b) => {
-            const groupA = (a.timed ? 1 : 0) + (a.done ? 2 : 0);
-            const groupB = (b.timed ? 1 : 0) + (b.done ? 2 : 0);
-            if (groupA !== groupB) return groupA - groupB;
-            return a.sortKey - b.sortKey;
-          });
+          // Build entries for a time section, optionally filtered to pending or done
+          function buildEntries(key: TimeKey, filter: "pending" | "completed"): Entry[] {
+            const sHabits = habitsBySection.get(key) ?? [];
+            const sEvents = eventsBySection.get(key) ?? [];
+            const all: Entry[] = [
+              ...sHabits.map((h) => ({
+                kind: "habit" as const,
+                item: h,
+                sortKey: h.exact_time ? exactMinutes(h) : (h.sort_order ?? 9999),
+                done: h.completed_today > 0,
+                timed: !!h.exact_time,
+              })),
+              ...sEvents.map((e) => {
+                const m = eventMinutes(e);
+                return {
+                  kind: "event" as const,
+                  item: e,
+                  sortKey: m >= 0 ? m : 9999,
+                  done: e.is_completed,
+                  timed: m >= 0,
+                };
+              }),
+            ];
+            const filtered = all.filter((e) => filter === "pending" ? !e.done : e.done);
+            filtered.sort((a, b) => {
+              const groupA = (a.timed ? 1 : 0);
+              const groupB = (b.timed ? 1 : 0);
+              if (groupA !== groupB) return groupA - groupB;
+              return a.sortKey - b.sortKey;
+            });
+            return filtered;
+          }
+
+          function buildAllDayEntries(filter: "pending" | "completed"): Entry[] {
+            const all: Entry[] = [
+              ...allDayHabits.map(h => ({ kind: "habit" as const, item: h, sortKey: h.sort_order ?? 9999, done: h.completed_today > 0, timed: false })),
+              ...allDayEvents.map(e => ({ kind: "event" as const, item: e, sortKey: 9999, done: e.is_completed, timed: false })),
+            ];
+            return all
+              .filter((e) => filter === "pending" ? !e.done : e.done)
+              .sort((a, b) => a.sortKey - b.sortKey);
+          }
+
+          function renderEntries(entries: Entry[]) {
+            return entries.map((entry) =>
+              entry.kind === "habit" ? (
+                <HabitCard
+                  key={entry.item.id}
+                  habit={entry.item as ProcessedHabit}
+                  today={today}
+                  onDoneChange={handleDoneChange}
+                  onToggle={handleHabitToggle}
+                  onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
+                  onView={() => setViewHabit(entry.item as ProcessedHabit)}
+                />
+              ) : (
+                <EventCard
+                  key={entry.item.id}
+                  event={entry.item as TodayEvent}
+                  onDoneChange={handleDoneChange}
+                  onEdit={() => setEditEvent(entry.item as TodayEvent)}
+                  onView={() => setViewEvent(entry.item as TodayEvent)}
+                />
+              )
+            );
+          }
+
+          function renderTimeSection(key: TimeKey, filter: "pending" | "completed") {
+            const entries = buildEntries(key, filter);
+            if (entries.length === 0) return null;
+            const sec = TIME_SECTIONS.find((s) => s.key === key)!;
+            const isCurrent = filter === "pending" && key === currentSectionKey;
+            const headerClass = filter === "completed"
+              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 flex items-center gap-1.5"
+              : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground flex items-center gap-1.5";
+            const rangeClass = filter === "completed"
+              ? "text-[10.5px] text-muted-foreground/40 tracking-[.08em]"
+              : "text-[10.5px] text-muted-foreground tracking-[.08em]";
+            return (
+              <section key={`${key}-${filter}`}>
+                <div className="flex items-center justify-between mb-2.5">
+                  <h2 className={headerClass}>
+                    {isCurrent && <span className="text-primary text-[8px] leading-none">●</span>}
+                    <span>{sec.icon}</span>
+                    <span>{sec.label}</span>
+                  </h2>
+                  <span className={rangeClass}>{sec.range}</span>
+                </div>
+                <div className="space-y-2">{renderEntries(entries)}</div>
+              </section>
+            );
+          }
+
+          function renderAllDaySection(filter: "pending" | "completed") {
+            const entries = buildAllDayEntries(filter);
+            if (entries.length === 0) return null;
+            const headerClass = filter === "completed"
+              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 mb-2.5"
+              : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground mb-2.5";
+            return (
+              <section key={`allday-${filter}`}>
+                <h2 className={headerClass}>🗓 All Day</h2>
+                <div className="space-y-2">{renderEntries(entries)}</div>
+              </section>
+            );
+          }
+
+          const hasAnyCompleted =
+            ALL_KEYS.some((k) => buildEntries(k, "completed").length > 0) ||
+            buildAllDayEntries("completed").length > 0;
 
           return (
-            <section key={key}>
-              <div className="flex items-center justify-between mb-2.5">
-                <h2 className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground flex items-center gap-1.5">
-                  <span>{icon}</span>
-                  <span>{label}</span>
-                </h2>
-                <span className="text-[10.5px] text-muted-foreground tracking-[.08em]">{range}</span>
-              </div>
-              <div className="space-y-2">
-                {entries.map((entry) =>
-                  entry.kind === "habit" ? (
-                    <HabitCard
-                      key={entry.item.id}
-                      habit={entry.item as ProcessedHabit}
-                      today={today}
-                      onDoneChange={handleDoneChange}
-                      onToggle={handleHabitToggle}
-                      onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
-                      onView={() => setViewHabit(entry.item as ProcessedHabit)}
-                    />
-                  ) : (
-                    <EventCard
-                      key={entry.item.id}
-                      event={entry.item as TodayEvent}
-                      onDoneChange={handleDoneChange}
-                      onEdit={() => setEditEvent(entry.item as TodayEvent)}
-                      onView={() => setViewEvent(entry.item as TodayEvent)}
-                    />
-                  )
-                )}
-              </div>
-            </section>
-          );
-        })}
+            <>
+              {/* ── Pending group ── */}
+              {upcomingKeys.map((key) => renderTimeSection(key, "pending"))}
+              {renderAllDaySection("pending")}
+              {pastKeys.map((key) => renderTimeSection(key, "pending"))}
 
-        {/* All Day — untimed items */}
-        {(allDayHabits.length > 0 || allDayEvents.length > 0) && (
-          <section>
-            <h2 className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground mb-2.5">🗓 All Day</h2>
-            <div className="space-y-2">
-              {[
-                ...allDayHabits.map(h => ({ kind: "habit" as const, item: h, sortKey: h.sort_order ?? 9999, done: h.completed_today > 0 })),
-                ...allDayEvents.map(e => ({ kind: "event" as const, item: e, sortKey: 9999, done: e.is_completed })),
-              ]
-                .sort((a, b) => {
-                  if (a.done !== b.done) return a.done ? 1 : -1;
-                  return a.sortKey - b.sortKey;
-                })
-                .map(entry =>
-                  entry.kind === "habit" ? (
-                    <HabitCard
-                      key={entry.item.id}
-                      habit={entry.item}
-                      today={today}
-                      onDoneChange={handleDoneChange}
-                      onToggle={handleHabitToggle}
-                      onEdit={() => setEditHabit(entry.item)}
-                      onView={() => setViewHabit(entry.item)}
-                    />
-                  ) : (
-                    <EventCard
-                      key={entry.item.id}
-                      event={entry.item}
-                      onDoneChange={handleDoneChange}
-                      onEdit={() => setEditEvent(entry.item)}
-                      onView={() => setViewEvent(entry.item)}
-                    />
-                  )
-                )
-              }
-            </div>
-          </section>
-        )}
+              {/* ── Completed divider ── */}
+              {hasAnyCompleted && (
+                <div className="flex items-center gap-3 py-1">
+                  <div className="flex-1 h-px bg-border/60" />
+                  <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground/60">Completed</span>
+                  <div className="flex-1 h-px bg-border/60" />
+                </div>
+              )}
+
+              {/* ── Completed group (fixed chronological order) ── */}
+              {ALL_KEYS.map((key) => renderTimeSection(key, "completed"))}
+              {renderAllDaySection("completed")}
+            </>
+          );
+        })()}
 
         {/* Weekly goals met */}
         {satisfiedHabits.length > 0 && (

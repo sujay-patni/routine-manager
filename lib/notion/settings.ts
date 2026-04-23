@@ -11,6 +11,7 @@ function pageToSettings(page: any): AppSettings {
     timezone: getText(props["Timezone"]) || "Asia/Kolkata",
     week_start_day: props["Week Start Day"]?.number ?? 1,
     deadline_surface_days: props["Deadline Surface Days"]?.number ?? 3,
+    day_start_hour: props["Day Start Hour"]?.number ?? 0,
   };
 }
 
@@ -37,6 +38,7 @@ export async function createAppSettings(data: Omit<AppSettings, "id">): Promise<
       Timezone: { rich_text: [{ text: { content: data.timezone } }] },
       "Week Start Day": { number: data.week_start_day },
       "Deadline Surface Days": { number: data.deadline_surface_days },
+      "Day Start Hour": { number: data.day_start_hour },
     },
   }) as any;
   return pageToSettings(page);
@@ -50,5 +52,6 @@ export async function updateAppSettings(
   if (data.timezone !== undefined) props["Timezone"] = { rich_text: [{ text: { content: data.timezone } }] };
   if (data.week_start_day !== undefined) props["Week Start Day"] = { number: data.week_start_day };
   if (data.deadline_surface_days !== undefined) props["Deadline Surface Days"] = { number: data.deadline_surface_days };
+  if (data.day_start_hour !== undefined) props["Day Start Hour"] = { number: data.day_start_hour };
   await notion.pages.update({ page_id: id, properties: props });
 }

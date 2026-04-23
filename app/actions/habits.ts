@@ -65,11 +65,12 @@ function getPeriodStart(
 
 export async function getTodayHabits(dateStr?: string) {
   const settings = await getSettings();
-  const { timezone, week_start_day: weekStartDay } = settings;
+  const { timezone, week_start_day: weekStartDay, day_start_hour: dayStartHour } = settings;
 
   let targetDate: Date;
   let weekStart: Date;
   let weekEnd: Date;
+  let isLateNight = false;
 
   if (dateStr) {
     targetDate = parseZonedOrLocal(dateStr, timezone);
@@ -77,10 +78,12 @@ export async function getTodayHabits(dateStr?: string) {
     weekStart = bounds.weekStart;
     weekEnd = bounds.weekEnd;
   } else {
-    const bounds = getWeekBoundaries(timezone, weekStartDay);
+    const bounds = getWeekBoundaries(timezone, weekStartDay, dayStartHour);
     targetDate = bounds.today;
     weekStart = bounds.weekStart;
     weekEnd = bounds.weekEnd;
+    const realToday = formatDateForDB(toZonedTime(new Date(), timezone));
+    isLateNight = formatDateForDB(targetDate) !== realToday;
   }
 
   const todayStr = formatDateForDB(targetDate);
@@ -176,12 +179,19 @@ export async function getTodayHabits(dateStr?: string) {
 
   const processed = processHabits(rawHabits, targetDate, weekEnd);
 
+  // During late-night the user is still in their day — suppress the urgent
+  // (orange border) state so undone earlier habits don't look alarming.
+  const finalHabits = isLateNight
+    ? processed.map((h) => h.state === "urgent" ? { ...h, state: "pending" as const } : h)
+    : processed;
+
   return {
-    habits: processed,
+    habits: finalHabits,
     today: todayStr,
     weekStart: weekStartStr,
     weekEnd: weekEndStr,
     timezone,
+    isLateNight,
   };
 }
 

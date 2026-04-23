@@ -60,4 +60,5 @@ export interface AppSettings {
   timezone: string;
   week_start_day: number;
   deadline_surface_days: number;
+  day_start_hour: number; // 0–23; habits don't reset until this hour (0 = midnight)
 }
