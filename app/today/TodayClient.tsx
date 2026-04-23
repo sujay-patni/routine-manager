@@ -549,9 +549,10 @@ export default function TodayClient({
 
           return (
             <>
-              {/* ── Pending group ── */}
-              {upcomingKeys.map((key) => renderTimeSection(key, "pending"))}
+              {/* ── Pending group: current → All-Day → remaining upcoming → past ── */}
+              {renderTimeSection(upcomingKeys[0], "pending")}
               {renderAllDaySection("pending")}
+              {upcomingKeys.slice(1).map((key) => renderTimeSection(key, "pending"))}
               {pastKeys.map((key) => renderTimeSection(key, "pending"))}
 
               {/* ── Completed divider ── */}
