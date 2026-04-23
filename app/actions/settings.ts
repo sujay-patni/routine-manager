@@ -16,6 +16,7 @@ function getEnvSettings(): AppSettings {
     timezone: process.env.TIMEZONE ?? "Asia/Kolkata",
     week_start_day: Number(process.env.WEEK_START_DAY ?? 1),
     deadline_surface_days: Number(process.env.DEADLINE_SURFACE_DAYS ?? 3),
+    day_start_hour: Number(process.env.DAY_START_HOUR ?? 0),
   };
 }
 
@@ -38,6 +39,7 @@ export async function saveSettings(data: {
   timezone: string;
   week_start_day: number;
   deadline_surface_days: number;
+  day_start_hour: number;
 }) {
   try {
     const existing = await getAppSettings();

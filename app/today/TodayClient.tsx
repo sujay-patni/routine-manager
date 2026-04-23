@@ -24,6 +24,7 @@ interface Props {
   dayLabel: string;
   relativeLabel: string;
   dateStr: string;
+  isLateNight: boolean;
 }
 
 export type OptimisticAction<T> = { action: "add" | "update" | "delete"; item: T };
@@ -114,6 +115,7 @@ export default function TodayClient({
   dayLabel,
   relativeLabel,
   dateStr,
+  isLateNight,
 }: Props) {
   const [optHabits, dispatchHabit] = useOptimistic(
     habits,
@@ -244,21 +246,25 @@ export default function TodayClient({
     const base = parseISO(dateStr);
     const target = direction === "prev" ? subDays(base, 1) : addDays(base, 1);
     const newDate = format(target, "yyyy-MM-dd");
-    if (newDate === format(new Date(), "yyyy-MM-dd")) {
+    const realTodayStr = format(new Date(), "yyyy-MM-dd");
+    // When in late-night mode, navigating forward to the real calendar day should use
+    // an explicit date so the user sees real-date events, not the effective-date habits.
+    if (newDate === realTodayStr && !isLateNight) {
       router.push("/today");
     } else {
       router.push(`/today?date=${newDate}`);
     }
-  }, [dateStr, router]);
+  }, [dateStr, isLateNight, router]);
 
   const navigateToDate = useCallback((newDate: string) => {
     if (!newDate) return;
-    if (newDate === format(new Date(), "yyyy-MM-dd")) {
+    const realTodayStr = format(new Date(), "yyyy-MM-dd");
+    if (newDate === realTodayStr && !isLateNight) {
       router.push("/today");
     } else {
       router.push(`/today?date=${newDate}`);
     }
-  }, [router]);
+  }, [isLateNight, router]);
 
   const visibleEvents = optEvents;
   const visibleHabits = optHabits.filter((h) => h.show && h.state !== "satisfied");
@@ -269,7 +275,7 @@ export default function TodayClient({
     visibleEvents.filter((e) => doneOverrides.has(e.id) ? doneOverrides.get(e.id) : e.is_completed).length;
   const totalCount = optHabits.length + visibleEvents.length;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-  const isToday = dateStr === format(new Date(), "yyyy-MM-dd");
+  const isToday = isLateNight || dateStr === format(new Date(), "yyyy-MM-dd");
 
   // ── Bucket items into time sections ──────────────────────────────────────
   const habitsBySection = new Map<TimeKey, ProcessedHabit[]>();
@@ -406,6 +412,13 @@ export default function TodayClient({
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-6">
+
+        {isLateNight && (
+          <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground bg-muted/50 rounded-xl px-3 py-2.5">
+            <span>🌙</span>
+            <span>Late night — showing <strong>{dayLabel}</strong> habits. Your new day starts later.</span>
+          </div>
+        )}
 
         {/* Time-of-day sections */}
         {TIME_SECTIONS.map(({ key, label, icon, range }) => {

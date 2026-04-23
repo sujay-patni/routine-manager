@@ -14,7 +14,7 @@ export default async function TodayPage({ searchParams }: Props) {
   const params = await searchParams;
   const dateStr = params.date;
 
-  const [{ habits, today, weekStart, weekEnd, timezone }, events] = await Promise.all([
+  const [{ habits, today, weekStart, weekEnd, timezone, isLateNight }, events] = await Promise.all([
     getTodayHabits(dateStr),
     getTodayEvents(dateStr),
   ]);
@@ -30,7 +30,8 @@ export default async function TodayPage({ searchParams }: Props) {
   const yesterdayStr = format(subDays(nowInTz, 1), "yyyy-MM-dd");
 
   let relativeLabel = dayLabel;
-  if (today === nowStr) relativeLabel = "Today";
+  if (isLateNight && !dateStr) relativeLabel = "Today";
+  else if (today === nowStr) relativeLabel = "Today";
   else if (today === tomorrowStr) relativeLabel = "Tomorrow";
   else if (today === yesterdayStr) relativeLabel = "Yesterday";
 
@@ -44,6 +45,7 @@ export default async function TodayPage({ searchParams }: Props) {
       dayLabel={dayLabel}
       relativeLabel={relativeLabel}
       dateStr={today}
+      isLateNight={isLateNight}
     />
   );
 }

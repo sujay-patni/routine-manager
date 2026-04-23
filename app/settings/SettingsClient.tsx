@@ -98,6 +98,7 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
   const [timezone, setTimezone] = useState(settings.timezone);
   const [weekStart, setWeekStart] = useState(String(settings.week_start_day));
   const [surfaceDays, setSurfaceDays] = useState(String(settings.deadline_surface_days));
+  const [dayStartHour, setDayStartHour] = useState(String(settings.day_start_hour));
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -111,6 +112,7 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
       timezone,
       week_start_day: Number(weekStart),
       deadline_surface_days: Number(surfaceDays),
+      day_start_hour: Number(dayStartHour),
     });
     setSavingSettings(false);
     if (!result.error) {
@@ -273,6 +275,33 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
               </div>
               <p className="text-xs text-muted-foreground mt-2">
                 A deadline with &ldquo;3 days&rdquo; will appear in your Today view starting 3 days before it&apos;s due.
+              </p>
+            </div>
+
+            <div className="py-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-medium text-[13px]">Day starts at</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {Number(dayStartHour) === 0 ? "Midnight (default)" : `${dayStartHour}:00 AM`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDayStartHour(String(Math.max(0, Number(dayStartHour) - 1)))}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center text-foreground text-base font-medium hover:bg-muted transition-colors"
+                  >−</button>
+                  <span className="text-sm font-semibold min-w-[1.5rem] text-center">{dayStartHour}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDayStartHour(String(Math.min(11, Number(dayStartHour) + 1)))}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center text-foreground text-base font-medium hover:bg-muted transition-colors"
+                  >+</button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Habits won&apos;t reset until this hour. Between midnight and this time, yesterday&apos;s habits stay active.
               </p>
             </div>
 
