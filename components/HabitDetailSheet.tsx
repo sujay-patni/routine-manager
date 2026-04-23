@@ -89,7 +89,7 @@ export default function HabitDetailSheet({ habit, open, onOpenChange, onEdit }: 
   })();
 
   const content = (
-    <div className="space-y-5 pt-2">
+    <div className="space-y-5 px-4 pb-4">
       {/* Description */}
       {habit.description && (
         <div className="bg-muted/50 rounded-xl p-4">
@@ -145,7 +145,7 @@ export default function HabitDetailSheet({ habit, open, onOpenChange, onEdit }: 
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="bottom" className="rounded-t-2xl max-h-[85vh] overflow-y-auto pb-safe-offset-6">
-          <SheetHeader className="mb-4">
+          <SheetHeader className="pb-0">
             <SheetTitle className="text-left">{habit.name}</SheetTitle>
           </SheetHeader>
           {content}
