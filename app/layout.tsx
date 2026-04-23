@@ -1,12 +1,20 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Fraunces } from "next/font/google";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import Sidebar from "@/components/Sidebar";
+import { SettingsProvider } from "@/components/SettingsProvider";
+import { getSettings } from "@/app/actions/settings";
 
 const geist = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+});
+
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  axes: ["opsz"],
 });
 
 export const metadata: Metadata = {
@@ -28,23 +36,33 @@ export const viewport: Viewport = {
   themeColor: "#8b5cf6",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const settings = await getSettings();
+
   return (
-    <html lang="en" className={`${geist.variable} h-full antialiased`}>
+    <html lang="en" className={`${geist.variable} ${fraunces.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        {/* Apply saved theme before first paint to avoid flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('rt-theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}})()`,
+          }}
+        />
       </head>
       <body className="min-h-full flex bg-background">
-        <Sidebar />
-        {/* Main content — offset on desktop to clear sidebar */}
-        <div className="flex flex-col flex-1 min-w-0 lg:pl-56">
-          {children}
-        </div>
-        <BottomNav />
+        <SettingsProvider settings={settings}>
+          <Sidebar />
+          {/* Main content — offset on desktop to clear sidebar */}
+          <div className="flex flex-col flex-1 min-w-0 lg:pl-56">
+            {children}
+          </div>
+          <BottomNav />
+        </SettingsProvider>
       </body>
     </html>
   );

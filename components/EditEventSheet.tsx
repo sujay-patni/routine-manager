@@ -340,7 +340,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="bottom" className="h-auto max-h-[85vh] overflow-y-auto rounded-t-3xl px-4 pb-10">
-        <SheetHeader className="mb-5">
+        <SheetHeader className="mb-5" showHandle>
           <SheetTitle className="flex items-center gap-2">
             <span>{typeIcon}</span>
             <span>Edit {typeLabel}</span>

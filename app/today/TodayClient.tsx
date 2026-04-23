@@ -2,12 +2,13 @@
 
 import { useState, useCallback, useEffect, useRef, useOptimistic, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Progress } from "@/components/ui/progress";
 import HabitCard from "@/components/HabitCard";
 import EventCard from "@/components/EventCard";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditHabitSheet from "@/components/EditHabitSheet";
 import EditEventSheet from "@/components/EditEventSheet";
+import HabitDetailSheet from "@/components/HabitDetailSheet";
+import EventDetailSheet from "@/components/EventDetailSheet";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
 import type { AppEvent } from "@/lib/notion/types";
@@ -148,6 +149,28 @@ export default function TodayClient({
 
   const [, startHabitTransition] = useTransition();
 
+  // Debounce queue: habitId → pending write + transition resolver
+  const pendingWrites = useRef<Map<string, { serverFn: () => Promise<void>; resolve: () => void }>>(new Map());
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPendingWrites = useCallback(async () => {
+    const entries = [...pendingWrites.current.values()];
+    pendingWrites.current.clear();
+    flushTimerRef.current = null;
+    if (entries.length === 0) return;
+    // Fire all queued writes in parallel, then resolve their transitions together.
+    await Promise.all(entries.map(e => e.serverFn()));
+    entries.forEach(e => e.resolve());
+  }, []);
+
+  // Flush any remaining writes when navigating away.
+  useEffect(() => () => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushPendingWrites();
+    }
+  }, [flushPendingWrites]);
+
   function handleHabitToggle(id: string, done: boolean, serverFn: () => Promise<void>) {
     handleDoneChange(id, done);
     const h = optHabits.find(h => h.id === id) as HabitWithDates | undefined;
@@ -157,6 +180,14 @@ export default function TodayClient({
       ? [...byDate, dateStr]
       : byDate.filter((d: string) => d !== dateStr);
     const delta = done ? 1 : -1;
+
+    // If this habit already has a write queued, cancel it (retoggle within the window).
+    const existing = pendingWrites.current.get(id);
+    if (existing) {
+      existing.resolve();
+      pendingWrites.current.delete(id);
+    }
+
     startHabitTransition(async () => {
       dispatchHabit({
         action: "update",
@@ -167,9 +198,13 @@ export default function TodayClient({
           completions_by_date: newByDate,
         },
       });
-      // Await the actual Notion write: keeps this transition pending so
-      // useOptimistic doesn't revert before Notion confirms the change.
-      await serverFn();
+      // Keep this transition alive until the debounce flush resolves it.
+      // Multiple habits tapped within 800ms share one flush → one round of parallel writes.
+      await new Promise<void>((resolve) => {
+        pendingWrites.current.set(id, { serverFn, resolve });
+        if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = setTimeout(flushPendingWrites, 800);
+      });
     });
   }
 
@@ -200,6 +235,10 @@ export default function TodayClient({
   // — Inline editing —
   const [editHabit, setEditHabit] = useState<ProcessedHabit | null>(null);
   const [editEvent, setEditEvent] = useState<TodayEvent | null>(null);
+
+  // — Detail views —
+  const [viewHabit, setViewHabit] = useState<ProcessedHabit | null>(null);
+  const [viewEvent, setViewEvent] = useState<TodayEvent | null>(null);
 
   const navigate = useCallback((direction: "prev" | "next") => {
     const base = parseISO(dateStr);
@@ -285,51 +324,83 @@ export default function TodayClient({
     habitsByWeekSection.get(sec)!.push(h);
   }
 
+  // Derive date display values
+  const parsedDate = parseISO(dateStr);
+  const weekdayName = format(parsedDate, "EEEE");   // "Thursday"
+  const monthName   = format(parsedDate, "MMMM");   // "April"
+  const dayNum      = format(parsedDate, "d");       // "18"
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b px-4 py-3">
+      {/* Editorial Header */}
+      <header className="sticky top-0 z-10 bg-background/85 backdrop-blur border-b px-4 pt-3.5 pb-3">
         <div className="max-w-2xl mx-auto">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button onClick={() => navigate("prev")} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-muted transition-colors text-muted-foreground" aria-label="Previous day">‹</button>
-              {/* Clickable date label — opens native date picker */}
-              <div className="relative">
-                <button
-                  onClick={() => dateInputRef.current?.showPicker?.() ?? dateInputRef.current?.click()}
-                  className="text-center hover:bg-muted rounded-lg px-2 py-1 transition-colors"
-                  aria-label="Pick a date"
-                >
-                  <h1 className={cn("text-sm font-semibold", relativeLabel === "Today" ? "text-primary" : "text-foreground")}>
-                    {relativeLabel}
-                  </h1>
-                  {relativeLabel !== "Today" && relativeLabel !== dayLabel && (
-                    <p className="text-xs text-muted-foreground">{dayLabel}</p>
-                  )}
-                </button>
-                <input
-                  ref={dateInputRef}
-                  type="date"
-                  value={dateStr}
-                  onChange={(e) => navigateToDate(e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  aria-hidden="true"
-                  tabIndex={-1}
-                />
+          <div className="flex items-end justify-between gap-4">
+            {/* Left: date display */}
+            <div className="min-w-0">
+              <div className="text-[10.5px] font-semibold tracking-[.22em] uppercase text-muted-foreground mb-1">
+                {isToday ? "Today" : relativeLabel}
               </div>
-              <button onClick={() => navigate("next")} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-muted transition-colors text-muted-foreground" aria-label="Next day">›</button>
+              <div
+                className="font-fraunces font-normal leading-[.9] tracking-tight text-[44px] text-foreground"
+              >
+                {weekdayName},
+              </div>
+              <div
+                className="font-fraunces italic font-light leading-none text-[32px] text-muted-foreground mt-0.5"
+              >
+                {monthName} {dayNum}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {!isToday && (
-                <button onClick={() => router.push("/today")} className="text-xs text-primary font-medium">Go to today</button>
-              )}
-              <div className="flex items-center gap-1.5">
-                <Progress value={progress} className="h-1.5 w-16" />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">{doneCount}/{totalCount}</span>
+            {/* Right: nav + progress ring */}
+            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+              <div className="flex gap-1">
+                <button
+                  onClick={() => navigate("prev")}
+                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  aria-label="Previous day"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <button
+                  onClick={() => dateInputRef.current?.showPicker()}
+                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  aria-label="Pick a date"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => navigate("next")}
+                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  aria-label="Next day"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
               </div>
+              <ProgressRing done={doneCount} total={totalCount} />
+              {!isToday && (
+                <button onClick={() => router.push("/today")} className="text-[11px] text-primary font-medium">
+                  Go to today
+                </button>
+              )}
             </div>
           </div>
+
+          {/* Hidden date input */}
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={dateStr}
+            onChange={(e) => navigateToDate(e.target.value)}
+            className="sr-only"
+            tabIndex={-1}
+          />
         </div>
       </header>
 
@@ -381,11 +452,13 @@ export default function TodayClient({
 
           return (
             <section key={key}>
-              <h2 className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                <span>{icon}</span>
-                <span>{label}</span>
-                <span className="font-normal opacity-60">· {range}</span>
-              </h2>
+              <div className="flex items-center justify-between mb-2.5">
+                <h2 className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground flex items-center gap-1.5">
+                  <span>{icon}</span>
+                  <span>{label}</span>
+                </h2>
+                <span className="text-[10.5px] text-muted-foreground tracking-[.08em]">{range}</span>
+              </div>
               <div className="space-y-2">
                 {entries.map((entry) =>
                   entry.kind === "habit" ? (
@@ -396,6 +469,7 @@ export default function TodayClient({
                       onDoneChange={handleDoneChange}
                       onToggle={handleHabitToggle}
                       onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
+                      onView={() => setViewHabit(entry.item as ProcessedHabit)}
                     />
                   ) : (
                     <EventCard
@@ -403,6 +477,7 @@ export default function TodayClient({
                       event={entry.item as TodayEvent}
                       onDoneChange={handleDoneChange}
                       onEdit={() => setEditEvent(entry.item as TodayEvent)}
+                      onView={() => setViewEvent(entry.item as TodayEvent)}
                     />
                   )
                 )}
@@ -414,7 +489,7 @@ export default function TodayClient({
         {/* All Day — untimed items */}
         {(allDayHabits.length > 0 || allDayEvents.length > 0) && (
           <section>
-            <h2 className="text-xs font-semibold text-muted-foreground mb-2">🗓 All Day</h2>
+            <h2 className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground mb-2.5">🗓 All Day</h2>
             <div className="space-y-2">
               {[
                 ...allDayHabits.map(h => ({ kind: "habit" as const, item: h, sortKey: h.sort_order ?? 9999, done: h.completed_today > 0 })),
@@ -433,6 +508,7 @@ export default function TodayClient({
                       onDoneChange={handleDoneChange}
                       onToggle={handleHabitToggle}
                       onEdit={() => setEditHabit(entry.item)}
+                      onView={() => setViewHabit(entry.item)}
                     />
                   ) : (
                     <EventCard
@@ -440,6 +516,7 @@ export default function TodayClient({
                       event={entry.item}
                       onDoneChange={handleDoneChange}
                       onEdit={() => setEditEvent(entry.item)}
+                      onView={() => setViewEvent(entry.item)}
                     />
                   )
                 )
@@ -451,7 +528,7 @@ export default function TodayClient({
         {/* Weekly goals met */}
         {satisfiedHabits.length > 0 && (
           <section>
-            <h2 className="text-xs font-semibold text-muted-foreground mb-2">Weekly goals met ✓</h2>
+            <h2 className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground mb-2.5">Weekly goals met ✓</h2>
             <div className="space-y-2">
               {satisfiedHabits.map((h) => (
                 <HabitCard
@@ -461,6 +538,7 @@ export default function TodayClient({
                   onDoneChange={handleDoneChange}
                   onToggle={handleHabitToggle}
                   onEdit={() => setEditHabit(h)}
+                  onView={() => setViewHabit(h)}
                 />
               ))}
             </div>
@@ -481,10 +559,10 @@ export default function TodayClient({
           <section className="border rounded-2xl bg-card card-elevated overflow-hidden">
             <button
               onClick={() => setWeekExpanded((v) => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 text-left"
+              className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
             >
-              <span className="text-xs font-semibold text-muted-foreground">This Week</span>
-              <span className="text-xs text-muted-foreground">{weekExpanded ? "▲" : "▼"}</span>
+              <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground">This Week</span>
+              <svg className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", weekExpanded && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="6 9 12 15 18 9"/></svg>
             </button>
 
             {weekExpanded && (
@@ -537,7 +615,9 @@ export default function TodayClient({
                               })}
                             </div>
                             <div className="flex items-center gap-2 min-w-[420px]">
-                              <Progress value={pct} className="flex-1 h-1" />
+                              <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
+                              </div>
                               <span className="text-xs text-muted-foreground flex-shrink-0 w-10 text-right">{done}/{target}</span>
                             </div>
                           </div>
@@ -583,10 +663,10 @@ export default function TodayClient({
       </div>
 
       {/* Sheets */}
-      <AddItemSheet 
-        open={sheetOpen} 
-        onOpenChange={setSheetOpen} 
-        defaultTab={sheetTab} 
+      <AddItemSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        defaultTab={sheetTab}
         dispatchHabit={dispatchHabit}
         dispatchEvent={dispatchEvent}
       />
@@ -602,6 +682,42 @@ export default function TodayClient({
         onOpenChange={(o) => { if (!o) setEditEvent(null); }}
         dispatchEvent={dispatchEvent}
       />
+      <HabitDetailSheet
+        habit={viewHabit}
+        open={!!viewHabit}
+        onOpenChange={(o) => { if (!o) setViewHabit(null); }}
+        onEdit={() => { setEditHabit(viewHabit); setViewHabit(null); }}
+      />
+      <EventDetailSheet
+        event={viewEvent as AppEvent | null}
+        open={!!viewEvent}
+        onOpenChange={(o) => { if (!o) setViewEvent(null); }}
+        onEdit={() => { setEditEvent(viewEvent); setViewEvent(null); }}
+      />
+    </div>
+  );
+}
+
+function ProgressRing({ done, total }: { done: number; total: number }) {
+  const r = 20;
+  const c = 2 * Math.PI * r;
+  const pct = total > 0 ? done / total : 0;
+  return (
+    <div className="relative w-[46px] h-[46px]">
+      <svg width="46" height="46" viewBox="0 0 46 46" style={{ transform: "rotate(-90deg)" }}>
+        <circle cx="23" cy="23" r={r} fill="none" stroke="var(--muted)" strokeWidth="3" />
+        <circle
+          cx="23" cy="23" r={r} fill="none"
+          stroke="var(--primary)" strokeWidth="3"
+          strokeDasharray={c}
+          strokeDashoffset={c * (1 - pct)}
+          strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 360ms ease" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-foreground">
+        {done}<span className="text-muted-foreground font-normal">/{total}</span>
+      </div>
     </div>
   );
 }

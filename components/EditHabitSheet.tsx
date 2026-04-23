@@ -481,7 +481,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="bottom" className="h-auto max-h-[90vh] overflow-y-auto rounded-t-3xl px-4 pb-10">
-        <SheetHeader className="mb-5">
+        <SheetHeader className="mb-5" showHandle>
           <SheetTitle>Edit Habit</SheetTitle>
         </SheetHeader>
         {formContent}
