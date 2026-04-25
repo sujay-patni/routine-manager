@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { getTodayHabits } from "@/app/actions/habits";
 import { getTodayEvents } from "@/app/actions/events";
+import { getAllGroups } from "@/app/actions/groups";
 import TodayClient from "./TodayClient";
 import { format, addDays, subDays, parseISO } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
@@ -14,9 +15,10 @@ export default async function TodayPage({ searchParams }: Props) {
   const params = await searchParams;
   const dateStr = params.date;
 
-  const [{ habits, today, weekStart, weekEnd, timezone, isLateNight }, events] = await Promise.all([
+  const [{ habits, today, weekStart, weekEnd, timezone, isLateNight }, events, groups] = await Promise.all([
     getTodayHabits(dateStr),
     getTodayEvents(dateStr),
+    getAllGroups(),
   ]);
 
   const todayDate = today ? parseISO(today) : new Date();
@@ -39,6 +41,7 @@ export default async function TodayPage({ searchParams }: Props) {
     <TodayClient
       habits={habits}
       events={events}
+      groups={groups}
       today={today}
       weekStart={weekStart}
       weekEnd={weekEnd}

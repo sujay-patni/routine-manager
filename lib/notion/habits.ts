@@ -24,6 +24,7 @@ function pageToHabit(page: any): Habit {
     progress_start: props["Progress Start"]?.number ?? null,
     progress_period: (getSelect(props["Progress Period"]) as ProgressPeriod) || null,
     sort_order: props["Sort Order"]?.number ?? null,
+    group_id: getRelationIds(props["Group"])[0] ?? null,
   };
 }
 
@@ -260,6 +261,7 @@ export async function createHabit(data: {
   progress_start?: number;
   progress_period?: string;
   sort_order?: number;
+  group_id?: string | null;
 }): Promise<Habit> {
   const props: any = {
     Name: { title: [{ text: { content: data.name } }] },
@@ -279,6 +281,7 @@ export async function createHabit(data: {
   if (data.progress_start != null) props["Progress Start"] = { number: data.progress_start };
   if (data.progress_period) props["Progress Period"] = { select: { name: data.progress_period } };
   if (data.sort_order != null) props["Sort Order"] = { number: data.sort_order };
+  if (data.group_id) props["Group"] = { relation: [{ id: data.group_id }] };
 
   const page = await notion.pages.create({
     parent: { data_source_id: HABITS_DB },
@@ -310,6 +313,7 @@ export async function updateHabit(
     progress_start: number | null;
     progress_period: string | null;
     sort_order: number | null;
+    group_id: string | null;
   }>
 ): Promise<void> {
   const props: Record<string, any> = {};
@@ -328,6 +332,7 @@ export async function updateHabit(
   if (data.progress_start !== undefined) props["Progress Start"] = { number: data.progress_start };
   if (data.progress_period !== undefined) props["Progress Period"] = data.progress_period ? { select: { name: data.progress_period } } : { select: null };
   if (data.sort_order !== undefined) props["Sort Order"] = { number: data.sort_order };
+  if (data.group_id !== undefined) props["Group"] = data.group_id ? { relation: [{ id: data.group_id }] } : { relation: [] };
 
   await notion.pages.update({ page_id: id, properties: props });
 }

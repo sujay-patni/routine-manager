@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { createHabit } from "@/app/actions/habits";
 import { createEvent } from "@/app/actions/events";
-import type { HabitFrequency } from "@/lib/notion/types";
+import type { HabitFrequency, Group } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import type { ProcessedHabit } from "@/lib/habit-logic";
@@ -67,6 +67,7 @@ interface AddItemSheetProps {
   defaultDate?: string; // YYYY-MM-DD — pre-fills date fields
   dispatchHabit?: (action: OptimisticAction<ProcessedHabit>) => void;
   dispatchEvent?: (action: OptimisticAction<TodayEvent>) => void;
+  groups?: Group[];
 }
 
 // toISOString() is always UTC — use Intl.DateTimeFormat to get the
@@ -75,7 +76,7 @@ function todayISO() {
   return new Intl.DateTimeFormat("en-CA").format(new Date()); // "en-CA" gives YYYY-MM-DD
 }
 
-export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit", defaultDate, dispatchHabit, dispatchEvent }: AddItemSheetProps) {
+export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit", defaultDate, dispatchHabit, dispatchEvent, groups = [] }: AddItemSheetProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -122,6 +123,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [eventDays, setEventDays] = useState<string[]>([]);
   const [eventTimeOfDay, setEventTimeOfDay] = useState("");
   const [eventShowExact, setEventShowExact] = useState(false);
+  const [groupId, setGroupId] = useState("");
 
   function baseDate() {
     return defaultDate ?? todayISO();
@@ -147,6 +149,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     setEventEndTime(""); setDueDate(baseDate()); setDueTime("");
     setSurfaceDays(3); setRecurrence("none"); setEventDays([]);
     setEventTimeOfDay(""); setEventShowExact(false);
+    setGroupId("");
     setError(null);
     setWarning(null);
   }
@@ -226,8 +229,9 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       progress_target: habitProgressOn && habitTarget2 ? Number(habitTarget2) : undefined,
       progress_start: habitProgressOn ? Number(habitStart) : undefined,
       progress_period: habitProgressOn ? habitProgressPeriod : undefined,
+      group_id: groupId || null,
     };
-    
+
     startTransition(async () => {
       if (dispatchHabit) {
         dispatchHabit({
@@ -246,6 +250,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
             week_progress: null,
             today_completion_id: null,
             sort_order: null,
+            group_id: groupId || null,
             target: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
             remaining: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
             daysLeftInWeek: 7,
@@ -277,6 +282,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       end_time: endISO,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
+      group_id: groupId || null,
     };
 
     startTransition(async () => {
@@ -306,6 +312,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       due_date: dueDate,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
+      group_id: groupId || null,
     };
 
     startTransition(async () => {
@@ -335,6 +342,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       due_date: dueDate,
       due_time: dueTime || undefined,
       surface_days: Number(surfaceDays),
+      group_id: groupId || null,
     };
 
     startTransition(async () => {
@@ -617,6 +625,30 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   <Textarea placeholder="Any notes…" value={habitDesc} onChange={e => setHabitDesc(e.target.value)} rows={2} />
                 </div>
 
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Habit"}
                 </Button>
@@ -685,6 +717,29 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Event"}
                 </Button>
@@ -767,6 +822,29 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Task"}
                 </Button>
@@ -821,6 +899,29 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Deadline"}
                 </Button>

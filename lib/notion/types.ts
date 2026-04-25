@@ -28,6 +28,7 @@ export interface Habit {
   progress_period: ProgressPeriod | null; // "daily" | "weekly" | "monthly" | "yearly"
   // display
   sort_order: number | null;
+  group_id: string | null;
 }
 
 export interface Completion {
@@ -53,6 +54,14 @@ export interface AppEvent {
   // scheduling
   time_of_day: TimeOfDay | null;
   due_time: string | null;       // "HH:MM" for tasks/deadlines
+  group_id: string | null;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number | null;
 }
 
 export interface AppSettings {

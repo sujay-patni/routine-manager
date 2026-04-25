@@ -1,7 +1,7 @@
 "use server";
 
 import { after } from "next/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import {
   getAllEvents,
   getAllEventsIncludingCompleted,
@@ -15,6 +15,12 @@ import { getWeekBoundaries, formatDateForDB, getDeadlineState, parseZonedOrLocal
 import { getSettings } from "@/app/actions/settings";
 import { toZonedTime } from "date-fns-tz";
 import type { AppEvent } from "@/lib/notion/types";
+
+const cachedGetAllEventsIncludingCompleted = unstable_cache(
+  getAllEventsIncludingCompleted,
+  ["events-all"],
+  { tags: ["events"], revalidate: 300 }
+);
 
 export interface TodayEvent extends AppEvent {
   daysUntilDue?: number;
@@ -60,7 +66,7 @@ export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
 
   let allEvents: AppEvent[];
   try {
-    allEvents = await getAllEventsIncludingCompleted();
+    allEvents = await cachedGetAllEventsIncludingCompleted();
   } catch (e: unknown) {
     const msg = String(e);
     if (msg.includes("Could not find database") || msg.includes("not shared")) {
@@ -122,7 +128,7 @@ export async function getAllEventsForCalendar(): Promise<AppEvent[]> {
   const settings = await getSettings();
   const { timezone } = settings;
 
-  const allEvents = await getAllEventsIncludingCompleted();
+  const allEvents = await cachedGetAllEventsIncludingCompleted();
   const result: AppEvent[] = [];
 
   // Expand from 3 months ago to 6 months from now
@@ -195,9 +201,11 @@ export async function createEvent(data: {
   surface_days?: number;
   time_of_day?: string;
   due_time?: string;
+  group_id?: string | null;
 }) {
   try {
     await notionCreateEvent(data);
+    revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
@@ -210,6 +218,7 @@ export async function createEvent(data: {
 export async function completeEvent(id: string) {
   after(async () => {
     await notionCompleteEvent(id);
+    revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
@@ -220,6 +229,7 @@ export async function completeEvent(id: string) {
 export async function setEventCompleted(id: string, isCompleted: boolean) {
   try {
     await notionSetEventCompleted(id, isCompleted);
+    revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
@@ -232,6 +242,7 @@ export async function setEventCompleted(id: string, isCompleted: boolean) {
 export async function deleteEvent(id: string, excludeDate?: string) {
   try {
     await notionDeleteEvent(id, excludeDate);
+    revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
@@ -255,10 +266,12 @@ export async function updateEvent(
     surface_days: number;
     time_of_day: string | null;
     due_time: string | null;
+    group_id: string | null;
   }>
 ) {
   try {
     await notionUpdateEvent(id, data);
+    revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
     return { success: true };

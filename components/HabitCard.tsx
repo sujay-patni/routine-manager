@@ -8,9 +8,12 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useRef } from "react";
 
+import type { Group } from "@/lib/notion/types";
+
 interface HabitCardProps {
   habit: ProcessedHabit;
   today: string;
+  groups?: Group[];
   onDoneChange?: (id: string, done: boolean) => void;
   onToggle?: (id: string, done: boolean, serverFn: () => Promise<void>) => void;
   onEdit?: () => void;
@@ -32,7 +35,7 @@ const stateConfig = {
   satisfied: { badge: { label: "week done ✓", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300" }, cardClass: "opacity-65", checkClass: "" },
 };
 
-export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit, onView }: HabitCardProps) {
+export default function HabitCard({ habit, today, groups, onDoneChange, onToggle, onEdit, onView }: HabitCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
   // Period total (for display in progress bar)
@@ -107,6 +110,7 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
   }
 
   const config = stateConfig[habit.state];
+  const groupColor = groups?.find((g) => g.id === habit.group_id)?.color ?? null;
   const isProgressDone = hasProgress && localProgress >= (habit.progress_target ?? 0);
   const effectiveDone = hasProgress ? isProgressDone : localDone;
 
@@ -142,6 +146,7 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
         isPending && "opacity-70",
         onView && "cursor-pointer"
       )}
+      style={groupColor ? { borderLeftWidth: "3px", borderLeftColor: groupColor } : undefined}
     >
       <div className="flex items-center gap-3">
         {/* Circle checkbox (non-progress habits only) */}
