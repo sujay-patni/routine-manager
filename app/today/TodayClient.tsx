@@ -11,13 +11,16 @@ import HabitDetailSheet from "@/components/HabitDetailSheet";
 import EventDetailSheet from "@/components/EventDetailSheet";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/notion/types";
 import { format, addDays, subDays, parseISO, eachDayOfInterval } from "date-fns";
 import { cn } from "@/lib/utils";
+import GroupFilterBar from "@/components/GroupFilterBar";
+import { useMemo } from "react";
 
 interface Props {
   habits: ProcessedHabit[];
   events: TodayEvent[];
+  groups: Group[];
   today: string;
   weekEnd: string;
   weekStart: string;
@@ -109,6 +112,7 @@ const FAB_OPTIONS = [
 export default function TodayClient({
   habits,
   events,
+  groups,
   today,
   weekEnd,
   weekStart,
@@ -143,6 +147,21 @@ export default function TodayClient({
 
   const router = useRouter();
   const [weekExpanded, setWeekExpanded] = useState(false);
+  const [groupFilters, setGroupFilters] = useState<string[]>([]);
+
+  const filteredHabits = useMemo(() => {
+    if (groupFilters.length === 0) return optHabits;
+    return optHabits.filter((h) =>
+      h.group_id ? groupFilters.includes(h.group_id) : groupFilters.includes("unassigned")
+    );
+  }, [optHabits, groupFilters]);
+
+  const filteredEvents = useMemo(() => {
+    if (groupFilters.length === 0) return optEvents;
+    return optEvents.filter((e) =>
+      e.group_id ? groupFilters.includes(e.group_id) : groupFilters.includes("unassigned")
+    );
+  }, [optEvents, groupFilters]);
 
   const [doneOverrides, setDoneOverrides] = useState<Map<string, boolean>>(new Map());
   function handleDoneChange(id: string, done: boolean) {
@@ -266,14 +285,14 @@ export default function TodayClient({
     }
   }, [isLateNight, router]);
 
-  const visibleEvents = optEvents;
-  const visibleHabits = optHabits.filter((h) => h.show && h.state !== "satisfied");
-  const satisfiedHabits = optHabits.filter((h) => h.state === "satisfied");
+  const visibleEvents = filteredEvents;
+  const visibleHabits = filteredHabits.filter((h) => h.show && h.state !== "satisfied");
+  const satisfiedHabits = filteredHabits.filter((h) => h.state === "satisfied");
 
   const doneCount =
-    optHabits.filter((h) => doneOverrides.has(h.id) ? doneOverrides.get(h.id) : h.completed_today > 0).length +
+    filteredHabits.filter((h) => doneOverrides.has(h.id) ? doneOverrides.get(h.id) : h.completed_today > 0).length +
     visibleEvents.filter((e) => doneOverrides.has(e.id) ? doneOverrides.get(e.id) : e.is_completed).length;
-  const totalCount = optHabits.length + visibleEvents.length;
+  const totalCount = filteredHabits.length + visibleEvents.length;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
   const isToday = isLateNight || dateStr === format(new Date(), "yyyy-MM-dd");
 
@@ -314,7 +333,7 @@ export default function TodayClient({
   
   // The 'This Week' table only makes sense for habits tracked on a daily/weekly basis.
   // Exclude progress habits with monthly/yearly reset — their period spans beyond a week.
-  const activeHabits = optHabits.filter((h) => {
+  const activeHabits = filteredHabits.filter((h) => {
     if (!h.is_active) return false;
     const freq = h.frequency;
     if (!(freq === "daily" || freq === "weekly" || freq === "specific_days_weekly")) return false;
@@ -410,6 +429,12 @@ export default function TodayClient({
         </div>
       </header>
 
+      {groups.length > 0 && (
+        <div className="px-4 pt-2 pb-1 max-w-2xl mx-auto w-full">
+          <GroupFilterBar groups={groups} activeFilters={groupFilters} onFilterChange={setGroupFilters} />
+        </div>
+      )}
+
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-6">
 
@@ -486,6 +511,7 @@ export default function TodayClient({
                   key={entry.item.id}
                   habit={entry.item as ProcessedHabit}
                   today={today}
+                  groups={groups}
                   onDoneChange={handleDoneChange}
                   onToggle={handleHabitToggle}
                   onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
@@ -495,6 +521,7 @@ export default function TodayClient({
                 <EventCard
                   key={entry.item.id}
                   event={entry.item as TodayEvent}
+                  groups={groups}
                   onDoneChange={handleDoneChange}
                   onEdit={() => setEditEvent(entry.item as TodayEvent)}
                   onView={() => setViewEvent(entry.item as TodayEvent)}
@@ -581,6 +608,7 @@ export default function TodayClient({
                   key={h.id}
                   habit={h}
                   today={today}
+                  groups={groups}
                   onDoneChange={handleDoneChange}
                   onToggle={handleHabitToggle}
                   onEdit={() => setEditHabit(h)}
@@ -715,18 +743,21 @@ export default function TodayClient({
         defaultTab={sheetTab}
         dispatchHabit={dispatchHabit}
         dispatchEvent={dispatchEvent}
+        groups={groups}
       />
       <EditHabitSheet
         habit={editHabit}
         open={!!editHabit}
         onOpenChange={(o) => { if (!o) setEditHabit(null); }}
         dispatchHabit={dispatchHabit}
+        groups={groups}
       />
       <EditEventSheet
         event={editEvent as AppEvent | null}
         open={!!editEvent}
         onOpenChange={(o) => { if (!o) setEditEvent(null); }}
         dispatchEvent={dispatchEvent}
+        groups={groups}
       />
       <HabitDetailSheet
         habit={viewHabit}
