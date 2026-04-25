@@ -23,6 +23,8 @@ function pageToHabit(page: any): Habit {
     progress_target: props["Progress Target"]?.number ?? null,
     progress_start: props["Progress Start"]?.number ?? null,
     progress_period: (getSelect(props["Progress Period"]) as ProgressPeriod) || null,
+    progress_conversion: props["Progress Conversion"]?.number ?? null,
+    duration_minutes: props["Duration"]?.number ?? null,
     sort_order: props["Sort Order"]?.number ?? null,
   };
 }
@@ -57,6 +59,7 @@ function pageToCompletion(page: any): Completion {
     date: getDate(props["Date"]),
     note: getText(props["Note"]) || null,
     progress_value: props["Progress Value"]?.number ?? null,
+    duration_actual: props["Duration Actual"]?.number ?? null,
   };
 }
 
@@ -133,6 +136,13 @@ async function ensureCompletionProgressColumn(): Promise<void> {
   });
 }
 
+async function ensureCompletionDurationColumn(): Promise<void> {
+  await (notion.dataSources as any).update({
+    data_source_id: COMPLETIONS_DB,
+    properties: { "Duration Actual": { number: {} } },
+  });
+}
+
 export async function ensureHabitSortOrderColumn(): Promise<void> {
   await (notion.dataSources as any).update({
     data_source_id: HABITS_DB,
@@ -140,20 +150,30 @@ export async function ensureHabitSortOrderColumn(): Promise<void> {
   });
 }
 
+export async function ensureHabitDurationColumns(): Promise<void> {
+  await (notion.dataSources as any).update({
+    data_source_id: HABITS_DB,
+    properties: {
+      "Duration": { number: {} },
+      "Progress Conversion": { number: {} },
+    },
+  });
+}
+
 export async function createCompletion(
   habitId: string,
   date: string,
   habitName: string,
-  progressValue?: number
+  progressValue?: number,
+  durationActual?: number
 ): Promise<Completion> {
   const props: any = {
     Title: { title: [{ text: { content: `${habitName} – ${date}` } }] },
     Habit: { relation: [{ id: habitId }] },
     Date: { date: { start: date } },
   };
-  if (progressValue !== undefined) {
-    props["Progress Value"] = { number: progressValue };
-  }
+  if (progressValue !== undefined) props["Progress Value"] = { number: progressValue };
+  if (durationActual !== undefined) props["Duration Actual"] = { number: durationActual };
 
   try {
     const page = await notion.pages.create({
@@ -162,27 +182,30 @@ export async function createCompletion(
     }) as any;
     return pageToCompletion(page);
   } catch (e: any) {
-    if (progressValue === undefined) throw e;
+    if (progressValue === undefined && durationActual === undefined) throw e;
     const msg: string = e?.message ?? String(e);
     const isMissingColumn =
       msg.includes("is not a property that exists") ||
-      msg.includes("not a property") ||
-      msg.includes("Progress Value");
+      msg.includes("not a property");
     if (!isMissingColumn) throw e;
-    // Column missing — add it, then retry without the progress value in the creation
-    // (the column will be set by updateCompletionProgress after creation).
+    // Columns missing — ensure them, then retry with only base props
     await ensureCompletionProgressColumn();
-    const propsWithout = { ...props };
-    delete propsWithout["Progress Value"];
+    await ensureCompletionDurationColumn();
+    const baseProps = {
+      Title: props.Title,
+      Habit: props.Habit,
+      Date: props.Date,
+    };
     const page = await notion.pages.create({
       parent: { data_source_id: COMPLETIONS_DB },
-      properties: propsWithout,
+      properties: baseProps,
     }) as any;
-    // Now set the progress value on the newly created page.
-    await notion.pages.update({
-      page_id: page.id,
-      properties: { "Progress Value": { number: progressValue } },
-    });
+    const updateProps: any = {};
+    if (progressValue !== undefined) updateProps["Progress Value"] = { number: progressValue };
+    if (durationActual !== undefined) updateProps["Duration Actual"] = { number: durationActual };
+    if (Object.keys(updateProps).length > 0) {
+      await notion.pages.update({ page_id: page.id, properties: updateProps });
+    }
     return pageToCompletion(page);
   }
 }
@@ -206,24 +229,24 @@ export async function findCompletion(habitId: string, date: string): Promise<Com
   return page ? pageToCompletion(page) : null;
 }
 
-export async function updateCompletionProgress(completionId: string, progressValue: number): Promise<void> {
+export async function updateCompletionProgress(
+  completionId: string,
+  progressValue: number,
+  durationActual?: number
+): Promise<void> {
+  const props: any = { "Progress Value": { number: progressValue } };
+  if (durationActual !== undefined) props["Duration Actual"] = { number: durationActual };
   try {
-    await notion.pages.update({
-      page_id: completionId,
-      properties: { "Progress Value": { number: progressValue } },
-    });
+    await notion.pages.update({ page_id: completionId, properties: props });
   } catch (e: any) {
     const msg: string = e?.message ?? String(e);
     const isMissingColumn =
       msg.includes("is not a property that exists") ||
-      msg.includes("not a property") ||
-      msg.includes("Progress Value");
+      msg.includes("not a property");
     if (!isMissingColumn) throw e;
     await ensureCompletionProgressColumn();
-    await notion.pages.update({
-      page_id: completionId,
-      properties: { "Progress Value": { number: progressValue } },
-    });
+    await ensureCompletionDurationColumn();
+    await notion.pages.update({ page_id: completionId, properties: props });
   }
 }
 
@@ -259,6 +282,8 @@ export async function createHabit(data: {
   progress_target?: number;
   progress_start?: number;
   progress_period?: string;
+  progress_conversion?: number;
+  duration_minutes?: number;
   sort_order?: number;
 }): Promise<Habit> {
   const props: any = {
@@ -278,6 +303,8 @@ export async function createHabit(data: {
   if (data.progress_target != null) props["Progress Target"] = { number: data.progress_target };
   if (data.progress_start != null) props["Progress Start"] = { number: data.progress_start };
   if (data.progress_period) props["Progress Period"] = { select: { name: data.progress_period } };
+  if (data.progress_conversion != null) props["Progress Conversion"] = { number: data.progress_conversion };
+  if (data.duration_minutes != null) props["Duration"] = { number: data.duration_minutes };
   if (data.sort_order != null) props["Sort Order"] = { number: data.sort_order };
 
   const page = await notion.pages.create({
@@ -309,6 +336,8 @@ export async function updateHabit(
     progress_target: number | null;
     progress_start: number | null;
     progress_period: string | null;
+    progress_conversion: number | null;
+    duration_minutes: number | null;
     sort_order: number | null;
   }>
 ): Promise<void> {
@@ -327,6 +356,8 @@ export async function updateHabit(
   if (data.progress_target !== undefined) props["Progress Target"] = { number: data.progress_target };
   if (data.progress_start !== undefined) props["Progress Start"] = { number: data.progress_start };
   if (data.progress_period !== undefined) props["Progress Period"] = data.progress_period ? { select: { name: data.progress_period } } : { select: null };
+  if (data.progress_conversion !== undefined) props["Progress Conversion"] = { number: data.progress_conversion };
+  if (data.duration_minutes !== undefined) props["Duration"] = { number: data.duration_minutes };
   if (data.sort_order !== undefined) props["Sort Order"] = { number: data.sort_order };
 
   await notion.pages.update({ page_id: id, properties: props });

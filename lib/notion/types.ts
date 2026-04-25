@@ -22,10 +22,13 @@ export interface Habit {
   exact_time: string | null;      // "HH:MM"
   specific_days: string | null;   // "MO,WE,FR" | "1,15" | "01-15"
   // progress tracking
-  progress_metric: string | null; // e.g. "steps"
+  progress_metric: string | null; // unit name e.g. "steps", "mins", "hrs"
   progress_target: number | null; // e.g. 10000
   progress_start: number | null;  // e.g. 0
   progress_period: ProgressPeriod | null; // "daily" | "weekly" | "monthly" | "yearly"
+  progress_conversion: number | null; // minutes per unit (for non-time units); null = 1
+  // duration
+  duration_minutes: number | null; // default expected time per completion (minutes)
   // display
   sort_order: number | null;
 }
@@ -36,6 +39,7 @@ export interface Completion {
   date: string;       // YYYY-MM-DD
   note: string | null;
   progress_value: number | null;
+  duration_actual: number | null; // actual time spent in minutes
 }
 
 export interface AppEvent {
@@ -53,6 +57,9 @@ export interface AppEvent {
   // scheduling
   time_of_day: TimeOfDay | null;
   due_time: string | null;       // "HH:MM" for tasks/deadlines
+  // duration
+  duration_minutes: number | null; // default expected time (minutes)
+  duration_actual: number | null;  // actual time logged at completion (minutes)
 }
 
 export interface AppSettings {
@@ -61,4 +68,5 @@ export interface AppSettings {
   week_start_day: number;
   deadline_surface_days: number;
   day_start_hour: number; // 0–23; habits don't reset until this hour (0 = midnight)
+  progress_units: string[]; // available units for progress tracking (always includes "mins","hrs")
 }

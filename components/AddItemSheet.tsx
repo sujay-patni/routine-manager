@@ -16,6 +16,11 @@ import { cn } from "@/lib/utils";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
+import { useSettings } from "@/components/SettingsProvider";
+
+function isTimeUnit(unit: string) {
+  return unit === "mins" || unit === "hrs";
+}
 
 const DAYS_OF_WEEK = [
   { abbr: "MO", label: "Mon" },
@@ -80,6 +85,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(true);
+  const settings = useSettings();
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -104,7 +110,9 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     { month: "01", day: "01" },
   ]);
   const [habitProgressOn, setHabitProgressOn] = useState(false);
-  const [habitMetric, setHabitMetric] = useState("");
+  const [habitMetric, setHabitMetric] = useState("mins");
+  const [habitConversion, setHabitConversion] = useState("1");
+  const [habitDuration, setHabitDuration] = useState("");
   const [habitTarget2, setHabitTarget2] = useState("");
   const [habitStart, setHabitStart] = useState("0");
   const [habitProgressPeriod, setHabitProgressPeriod] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
@@ -115,6 +123,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [eventDate, setEventDate] = useState(todayISO);
   const [eventTime, setEventTime] = useState("09:00");
   const [eventEndTime, setEventEndTime] = useState("");
+  const [eventDuration, setEventDuration] = useState("");
   const [dueDate, setDueDate] = useState(todayISO);
   const [dueTime, setDueTime] = useState("");
   const [surfaceDays, setSurfaceDays] = useState(3);
@@ -141,10 +150,11 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     setHabitTimeOfDay(""); setHabitExactTime(""); setHabitShowExact(false);
     setHabitDays([]); setHabitDates([]);
     setHabitYearlyDates([{ month: "01", day: "01" }]);
-    setHabitProgressOn(false); setHabitMetric(""); setHabitTarget2(""); setHabitStart("0");
+    setHabitProgressOn(false); setHabitMetric("mins"); setHabitConversion("1"); setHabitDuration("");
+    setHabitTarget2(""); setHabitStart("0");
     setHabitProgressPeriod("daily");
     setEventTitle(""); setEventDesc(""); setEventDate(baseDate()); setEventTime("09:00");
-    setEventEndTime(""); setDueDate(baseDate()); setDueTime("");
+    setEventEndTime(""); setEventDuration(""); setDueDate(baseDate()); setDueTime("");
     setSurfaceDays(3); setRecurrence("none"); setEventDays([]);
     setEventTimeOfDay(""); setEventShowExact(false);
     setError(null);
@@ -214,6 +224,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     e.preventDefault();
     if (!habitName.trim()) return;
     setError(null);
+    const conversionVal = habitProgressOn && !isTimeUnit(habitMetric) ? Number(habitConversion) : undefined;
     const payload = {
       name: habitName.trim(),
       description: habitDesc || undefined,
@@ -226,6 +237,8 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       progress_target: habitProgressOn && habitTarget2 ? Number(habitTarget2) : undefined,
       progress_start: habitProgressOn ? Number(habitStart) : undefined,
       progress_period: habitProgressOn ? habitProgressPeriod : undefined,
+      progress_conversion: conversionVal && !isNaN(conversionVal) ? conversionVal : undefined,
+      duration_minutes: habitDuration ? Number(habitDuration) : undefined,
     };
     
     startTransition(async () => {
@@ -277,6 +290,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       end_time: endISO,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
+      duration_minutes: eventDuration ? Number(eventDuration) : undefined,
     };
 
     startTransition(async () => {
@@ -306,6 +320,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       due_date: dueDate,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
+      duration_minutes: eventDuration ? Number(eventDuration) : undefined,
     };
 
     startTransition(async () => {
@@ -335,6 +350,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       due_date: dueDate,
       due_time: dueTime || undefined,
       surface_days: Number(surfaceDays),
+      duration_minutes: eventDuration ? Number(eventDuration) : undefined,
     };
 
     startTransition(async () => {
@@ -428,9 +444,33 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                         </div>
                         <div className="col-span-1 space-y-1">
                           <Label className="text-xs">Unit</Label>
-                          <Input value={habitMetric} onChange={e => setHabitMetric(e.target.value)} placeholder="steps" />
+                          <Select value={habitMetric} onValueChange={v => { if (v) { setHabitMetric(v); setHabitConversion("1"); } }}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {settings.progress_units.map(u => (
+                                <SelectItem key={u} value={u}>{u}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
+                      {!isTimeUnit(habitMetric) && (
+                        <div className="space-y-1">
+                          <Label className="text-xs">1 {habitMetric || "unit"} =</Label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={0.1}
+                              step={0.1}
+                              value={habitConversion}
+                              onChange={e => setHabitConversion(e.target.value)}
+                              placeholder="1"
+                              className="w-24"
+                            />
+                            <span className="text-xs text-muted-foreground">min</span>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-1">
                         <Label className="text-xs">Progress resets</Label>
                         <Select value={habitProgressPeriod} onValueChange={v => v && setHabitProgressPeriod(v as typeof habitProgressPeriod)}>
@@ -613,6 +653,17 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                 </div>
 
                 <div className="space-y-2">
+                  <Label>Default duration (min)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={habitDuration}
+                    onChange={e => setHabitDuration(e.target.value)}
+                    placeholder="e.g. 30"
+                  />
+                </div>
+
+                <div className="space-y-2">
                   <Label>Description</Label>
                   <Textarea placeholder="Any notes…" value={habitDesc} onChange={e => setHabitDesc(e.target.value)} rows={2} />
                 </div>
@@ -681,6 +732,10 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   )}
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Default duration (min)</Label>
+                  <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 60" />
+                </div>
                 <div className="space-y-2">
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
@@ -764,6 +819,10 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                 </div>
 
                 <div className="space-y-2">
+                  <Label>Default duration (min)</Label>
+                  <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 30" />
+                </div>
+                <div className="space-y-2">
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
@@ -816,6 +875,10 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                       <SelectItem value="yearly">Yearly</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Default duration (min)</Label>
+                  <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 60" />
                 </div>
                 <div className="space-y-2">
                   <Label>Notes</Label>

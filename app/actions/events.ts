@@ -195,6 +195,7 @@ export async function createEvent(data: {
   surface_days?: number;
   time_of_day?: string;
   due_time?: string;
+  duration_minutes?: number;
 }) {
   try {
     await notionCreateEvent(data);
@@ -217,9 +218,10 @@ export async function completeEvent(id: string) {
   return { success: true };
 }
 
-export async function setEventCompleted(id: string, isCompleted: boolean) {
+export async function setEventCompleted(id: string, isCompleted: boolean, durationActual?: number) {
   try {
-    await notionSetEventCompleted(id, isCompleted);
+    const baseId = id.split("_")[0];
+    await notionSetEventCompleted(baseId, isCompleted, durationActual);
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
@@ -255,6 +257,7 @@ export async function updateEvent(
     surface_days: number;
     time_of_day: string | null;
     due_time: string | null;
+    duration_minutes: number | null;
   }>
 ) {
   try {

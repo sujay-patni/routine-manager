@@ -9,6 +9,8 @@ import EditHabitSheet from "@/components/EditHabitSheet";
 import EditEventSheet from "@/components/EditEventSheet";
 import HabitDetailSheet from "@/components/HabitDetailSheet";
 import EventDetailSheet from "@/components/EventDetailSheet";
+import TimetableView from "@/app/today/TimetableView";
+import DayLogSheet from "@/app/today/DayLogSheet";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
 import type { AppEvent } from "@/lib/notion/types";
@@ -210,6 +212,24 @@ export default function TodayClient({
     });
   }
 
+  // — View mode —
+  const [viewMode, setViewMode] = useState<"card" | "timetable">(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("today_view_mode") as "card" | "timetable") ?? "card";
+    }
+    return "card";
+  });
+  function toggleViewMode() {
+    setViewMode(prev => {
+      const next = prev === "card" ? "timetable" : "card";
+      localStorage.setItem("today_view_mode", next);
+      return next;
+    });
+  }
+
+  // — Day Log —
+  const [dayLogOpen, setDayLogOpen] = useState(false);
+
   // — FAB dropdown —
   const [fabOpen, setFabOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -330,6 +350,18 @@ export default function TodayClient({
     habitsByWeekSection.get(sec)!.push(h);
   }
 
+  // ── Time summary ─────────────────────────────────────────────────────────
+  const plannedMins = optHabits.filter(h => h.show).reduce((s, h) => s + (h.duration_minutes ?? 0), 0)
+    + optEvents.reduce((s, e) => s + (e.duration_minutes ?? 0), 0);
+  const hasDuration = optHabits.some(h => h.duration_minutes != null) || optEvents.some(e => e.duration_minutes != null);
+
+  function fmtMins(m: number) {
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+  }
+
   // Derive date display values
   const parsedDate = parseISO(dateStr);
   const weekdayName = format(parsedDate, "EEEE");   // "Thursday"
@@ -388,6 +420,22 @@ export default function TodayClient({
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
+                <button
+                  onClick={toggleViewMode}
+                  className={cn("w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors", viewMode === "timetable" ? "text-primary bg-primary/10" : "text-muted-foreground")}
+                  aria-label={viewMode === "card" ? "Switch to timetable view" : "Switch to card view"}
+                >
+                  {viewMode === "card" ? (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10" x2="20" y2="10"/>
+                      <line x1="4" y1="14" x2="20" y2="14"/><line x1="4" y1="18" x2="20" y2="18"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                  )}
+                </button>
               </div>
               <ProgressRing done={doneCount} total={totalCount} />
               {!isToday && (
@@ -420,7 +468,32 @@ export default function TodayClient({
           </div>
         )}
 
-        {(() => {
+        {/* Time summary banner */}
+        {hasDuration && plannedMins > 0 && (
+          <div className="flex items-center justify-between text-[11.5px] text-muted-foreground bg-muted/30 rounded-xl px-3 py-2">
+            <span>⏱ ~{fmtMins(plannedMins)} planned</span>
+            <button
+              onClick={() => setDayLogOpen(true)}
+              className="text-primary font-medium hover:underline"
+            >
+              Day Log →
+            </button>
+          </div>
+        )}
+
+        {/* Timetable view */}
+        {viewMode === "timetable" && (
+          <TimetableView
+            habits={[...visibleHabits, ...satisfiedHabits]}
+            events={visibleEvents}
+            dateStr={dateStr}
+            doneOverrides={doneOverrides}
+            onViewHabit={setViewHabit}
+            onViewEvent={setViewEvent}
+          />
+        )}
+
+        {viewMode === "card" && (<>{(() => {
           // ── Section ordering ────────────────────────────────────────────────
           type Entry = {
             kind: "habit" | "event";
@@ -599,6 +672,7 @@ export default function TodayClient({
             <p className="text-sm text-muted-foreground">Add habits, tasks, and events to get started.</p>
           </div>
         )}
+        </>)}
 
         {/* This Week — collapsible habit grid */}
         {activeHabits.length > 0 && weekDays.length === 7 && (
@@ -678,6 +752,18 @@ export default function TodayClient({
         )}
       </main>
 
+      {/* Day Log FAB */}
+      <button
+        onClick={() => setDayLogOpen(true)}
+        className="fixed bottom-20 left-4 lg:bottom-6 z-40 w-12 h-12 rounded-full bg-card border shadow-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all active:scale-95"
+        aria-label="View day log"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+      </button>
+
       {/* FAB with dropdown */}
       <div ref={fabRef} className="fixed bottom-20 right-4 lg:bottom-6 z-40 flex flex-col items-end gap-2">
         {/* Dropdown menu */}
@@ -739,6 +825,11 @@ export default function TodayClient({
         open={!!viewEvent}
         onOpenChange={(o) => { if (!o) setViewEvent(null); }}
         onEdit={() => { setEditEvent(viewEvent); setViewEvent(null); }}
+      />
+      <DayLogSheet
+        open={dayLogOpen}
+        onOpenChange={setDayLogOpen}
+        dateStr={dateStr}
       />
     </div>
   );

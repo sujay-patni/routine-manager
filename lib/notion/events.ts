@@ -20,6 +20,8 @@ function pageToEvent(page: any): AppEvent {
     is_completed: getCheckbox(props["Completed"]),
     time_of_day: (getSelect(props["Time of Day"]) as TimeOfDay) || null,
     due_time: getText(props["Due Time"]) || null,
+    duration_minutes: props["Duration"]?.number ?? null,
+    duration_actual: props["Duration Actual"]?.number ?? null,
   };
 }
 
@@ -90,6 +92,7 @@ export async function createEvent(data: {
   surface_days?: number;
   time_of_day?: string;
   due_time?: string;
+  duration_minutes?: number;
 }): Promise<AppEvent> {
   const props: Record<string, any> = {
     Title: { title: [{ text: { content: data.title } }] },
@@ -106,6 +109,7 @@ export async function createEvent(data: {
   if (data.recurrence_rule) props["Recurrence Rule"] = { rich_text: [{ text: { content: data.recurrence_rule } }] };
   if (data.time_of_day) props["Time of Day"] = { select: { name: data.time_of_day } };
   if (data.due_time) props["Due Time"] = { rich_text: [{ text: { content: data.due_time } }] };
+  if (data.duration_minutes != null) props["Duration"] = { number: data.duration_minutes };
 
   const page = await notion.pages.create({
     parent: { data_source_id: EVENTS_DB },
@@ -122,11 +126,22 @@ export async function completeEvent(id: string): Promise<void> {
   });
 }
 
-export async function setEventCompleted(id: string, isCompleted: boolean): Promise<void> {
-  await notion.pages.update({
-    page_id: id,
-    properties: { Completed: { checkbox: isCompleted } },
-  });
+export async function setEventCompleted(id: string, isCompleted: boolean, durationActual?: number): Promise<void> {
+  const props: Record<string, any> = { Completed: { checkbox: isCompleted } };
+  if (isCompleted && durationActual !== undefined) props["Duration Actual"] = { number: durationActual };
+  try {
+    await notion.pages.update({ page_id: id, properties: props });
+  } catch (e: any) {
+    if (durationActual === undefined) throw e;
+    const msg: string = e?.message ?? String(e);
+    const isMissingColumn = msg.includes("is not a property that exists") || msg.includes("not a property");
+    if (!isMissingColumn) throw e;
+    await (notion.dataSources as any).update({
+      data_source_id: EVENTS_DB,
+      properties: { "Duration": { number: {} }, "Duration Actual": { number: {} } },
+    });
+    await notion.pages.update({ page_id: id, properties: props });
+  }
 }
 
 export async function deleteEvent(id: string, excludeDate?: string): Promise<void> {
@@ -174,6 +189,7 @@ export async function updateEvent(
     surface_days: number;
     time_of_day: string | null;
     due_time: string | null;
+    duration_minutes: number | null;
   }>
 ): Promise<void> {
   const props: Record<string, any> = {};
@@ -188,6 +204,7 @@ export async function updateEvent(
   if (data.surface_days !== undefined) props["Surface Days"] = { number: data.surface_days };
   if (data.time_of_day !== undefined) props["Time of Day"] = data.time_of_day ? { select: { name: data.time_of_day } } : { select: null };
   if (data.due_time !== undefined) props["Due Time"] = { rich_text: data.due_time ? [{ text: { content: data.due_time } }] : [] };
+  if (data.duration_minutes !== undefined) props["Duration"] = { number: data.duration_minutes };
 
   await notion.pages.update({ page_id: id, properties: props });
 }
