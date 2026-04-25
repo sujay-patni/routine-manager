@@ -1,12 +1,11 @@
 "use client";
 
-import { useTransition, useState } from "react";
+import { useTransition, useState, useRef } from "react";
 import { completeHabit, uncompleteHabit, logHabitProgress } from "@/app/actions/habits";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { useRef } from "react";
 
 interface HabitCardProps {
   habit: ProcessedHabit;
@@ -32,18 +31,36 @@ const stateConfig = {
   satisfied: { badge: { label: "week done ✓", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300" }, cardClass: "opacity-65", checkClass: "" },
 };
 
+// "mins" and "hrs" are direct-time units — the progress value IS the time
+const TIME_UNITS = new Set(["mins", "hrs"]);
+
+function isTimeUnit(unit: string | null | undefined): boolean {
+  return unit != null && TIME_UNITS.has(unit.toLowerCase());
+}
+
+function progressToMinutes(value: number, unit: string | null | undefined, conversion: number | null | undefined): number {
+  if (!unit) return Math.round(value);
+  const u = unit.toLowerCase();
+  if (u === "hrs") return Math.round(value * 60);
+  if (u === "mins") return Math.round(value);
+  return Math.round(value * (conversion ?? 1));
+}
+
 export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit, onView }: HabitCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
-  // Period total (for display in progress bar)
   const [localProgress, setLocalProgress] = useState(habit.today_progress ?? 0);
-  // Today's individual contribution (pre-fills the inline editor)
   const [localContribution, setLocalContribution] = useState(habit.today_contribution ?? 0);
   const [progressEditing, setProgressEditing] = useState(false);
   const [inputVal, setInputVal] = useState(String(habit.today_contribution ?? 0));
+  const [timeInputVal, setTimeInputVal] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync state if date changes or server returns updated data
+  // Duration punch (non-progress habits only)
+  const [showDurationPunch, setShowDurationPunch] = useState(false);
+  const [durationInput, setDurationInput] = useState("");
+  const durationRef = useRef<HTMLInputElement>(null);
+
   const [prevTodayStr, setPrevTodayStr] = useState(today);
   const [prevBaseCount, setPrevBaseCount] = useState(habit.completed_today);
   if (today !== prevTodayStr || habit.completed_today !== prevBaseCount) {
@@ -56,14 +73,28 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
   }
 
   const hasProgress = habit.progress_metric != null && habit.progress_target != null;
+  const timeBased = isTimeUnit(habit.progress_metric);
 
   function toggle() {
     if (hasProgress) return;
     const newDone = !localDone;
     setLocalDone(newDone);
     onDoneChange?.(habit.id, newDone);
+
+    // If turning on and habit has a default duration, show punch prompt
+    if (newDone && habit.duration_minutes != null) {
+      setDurationInput(String(habit.duration_minutes));
+      setShowDurationPunch(true);
+      setTimeout(() => durationRef.current?.focus(), 30);
+      return; // defer server call until punch is resolved
+    }
+
+    dispatchToggle(newDone, undefined);
+  }
+
+  function dispatchToggle(newDone: boolean, durationActual: number | undefined) {
     const serverFn = async () => {
-      if (newDone) await completeHabit(habit.id, today, habit.name);
+      if (newDone) await completeHabit(habit.id, today, habit.name, durationActual);
       else await uncompleteHabit(habit.id, today);
     };
     if (onToggle) {
@@ -73,9 +104,24 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
     }
   }
 
+  function saveDuration() {
+    setShowDurationPunch(false);
+    const val = Number(durationInput);
+    dispatchToggle(true, !isNaN(val) && val > 0 ? val : undefined);
+  }
+
+  function skipDuration() {
+    setShowDurationPunch(false);
+    dispatchToggle(true, undefined);
+  }
+
   function openProgressEditor(e: React.MouseEvent) {
     e.stopPropagation();
-    setInputVal(String(localContribution)); // pre-fill with today's contribution, not period total
+    setInputVal(String(localContribution));
+    if (!timeBased) {
+      const prefill = progressToMinutes(localContribution, habit.progress_metric, habit.progress_conversion);
+      setTimeInputVal(prefill > 0 ? String(prefill) : "");
+    }
     setProgressEditing(true);
     setTimeout(() => inputRef.current?.focus(), 30);
   }
@@ -83,22 +129,27 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
   function submitProgress(e?: React.FormEvent) {
     e?.preventDefault();
     e?.stopPropagation();
-    const raw = Math.max(
-      0,
-      Math.min((habit.progress_target ?? 0) * 2, Number(inputVal) || 0)
-    );
+    const raw = Math.max(0, Math.min((habit.progress_target ?? 0) * 2, Number(inputVal) || 0));
     const newContrib = Math.round(raw * 100) / 100;
-    // Optimistic: period total = old_total - old_contribution + new_contribution
     const newPeriodTotal = localProgress - localContribution + newContrib;
     setLocalProgress(newPeriodTotal);
     setLocalContribution(newContrib);
     setProgressEditing(false);
     const nowDone = habit.progress_target != null && newPeriodTotal >= habit.progress_target;
     onDoneChange?.(habit.id, nowDone);
+
+    // Compute duration_actual
+    let durationActual: number | undefined;
+    if (timeBased) {
+      durationActual = progressToMinutes(newContrib, habit.progress_metric, habit.progress_conversion);
+    } else if (timeInputVal !== "") {
+      const t = Number(timeInputVal);
+      if (!isNaN(t) && t > 0) durationActual = Math.round(t);
+    }
+
     startTransition(async () => {
-      const result = await logHabitProgress(habit.id, today, habit.name, newContrib);
+      const result = await logHabitProgress(habit.id, today, habit.name, newContrib, durationActual);
       if (result?.error) {
-        // Revert on error
         setLocalProgress(habit.today_progress ?? 0);
         setLocalContribution(habit.today_contribution ?? 0);
         onDoneChange?.(habit.id, habit.progress_target != null && (habit.today_progress ?? 0) >= habit.progress_target);
@@ -115,8 +166,6 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
       ? `${habit.completions_this_week}/${habit.target}`
       : null;
 
-  // Only show a time label for exact_time (e.g. "9:00 AM") — not for time_of_day
-  // since the parent section heading already says "Morning", "Evening", etc.
   const timeLabel = habit.exact_time
     ? (() => {
         const [h, m] = habit.exact_time.split(":").map(Number);
@@ -144,7 +193,7 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
       )}
     >
       <div className="flex items-center gap-3">
-        {/* Circle checkbox (non-progress habits only) */}
+        {/* Circle checkbox (non-progress only) */}
         {!hasProgress && (
           <button
             onClick={(e) => { e.stopPropagation(); toggle(); }}
@@ -164,14 +213,15 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
           </button>
         )}
 
-        {/* Name */}
+        {/* Name + labels */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className={cn("font-semibold text-sm", effectiveDone && "line-through text-muted-foreground")}>
               {habit.name}
             </span>
-            {timeLabel && (
-              <span className="text-xs text-muted-foreground">· {timeLabel}</span>
+            {timeLabel && <span className="text-xs text-muted-foreground">· {timeLabel}</span>}
+            {!hasProgress && habit.duration_minutes != null && (
+              <span className="text-xs text-muted-foreground">· ~{habit.duration_minutes}m</span>
             )}
           </div>
           {weeklyProgress && (
@@ -234,14 +284,9 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
                 <span className="ml-1 opacity-70">{periodLabel}</span>
               )}
             </span>
-            {isProgressDone && (
-              <span className="text-xs text-emerald-600 font-medium">Done ✓</span>
-            )}
+            {isProgressDone && <span className="text-xs text-emerald-600 font-medium">Done ✓</span>}
           </div>
-          <Progress
-            value={progressPct}
-            className={cn("h-1.5", isProgressDone && "[&>div]:bg-emerald-500")}
-          />
+          <Progress value={progressPct} className={cn("h-1.5", isProgressDone && "[&>div]:bg-emerald-500")} />
         </div>
       )}
 
@@ -250,39 +295,94 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onEdit
         <form
           onSubmit={submitProgress}
           onClick={(e) => e.stopPropagation()}
+          className="flex flex-col gap-2 mt-2 pt-2 border-t border-border/50"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              type="number"
+              value={inputVal}
+              onChange={(e) => {
+                setInputVal(e.target.value);
+                if (!timeBased) {
+                  const v = Number(e.target.value) || 0;
+                  setTimeInputVal(String(progressToMinutes(v, habit.progress_metric, habit.progress_conversion) || ""));
+                }
+              }}
+              onKeyDown={(e) => { if (e.key === "Escape") setProgressEditing(false); }}
+              step="0.01"
+              min={0}
+              className="w-24 text-sm border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground flex-1">{habit.progress_metric} today</span>
+            <button
+              type="button"
+              onClick={() => setProgressEditing(false)}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+              aria-label="Cancel"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <button
+              type="submit"
+              className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all"
+              aria-label="Save progress"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          </div>
+          {/* Time field for non-time units */}
+          {!timeBased && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">⏱</span>
+              <input
+                type="number"
+                value={timeInputVal}
+                onChange={(e) => setTimeInputVal(e.target.value)}
+                min={0}
+                placeholder="min"
+                className="w-20 text-sm border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span className="text-xs text-muted-foreground">min (optional)</span>
+            </div>
+          )}
+        </form>
+      )}
+
+      {/* Duration punch (after marking done, if duration_minutes is set) */}
+      {showDurationPunch && (
+        <form
+          onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); saveDuration(); }}
+          onClick={(e) => e.stopPropagation()}
           className="flex items-center gap-2 mt-2 pt-2 border-t border-border/50"
         >
+          <span className="text-xs text-muted-foreground">⏱</span>
           <input
-            ref={inputRef}
+            ref={durationRef}
             type="number"
-            value={inputVal}
-            onChange={(e) => setInputVal(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Escape") setProgressEditing(false); }}
-            step="0.01"
+            value={durationInput}
+            onChange={(e) => setDurationInput(e.target.value)}
             min={0}
-            className="w-24 text-sm border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="min"
+            className="w-20 text-sm border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          <span className="text-xs text-muted-foreground flex-1">
-            {habit.progress_metric} today
-          </span>
+          <span className="text-xs text-muted-foreground flex-1">min</span>
           <button
             type="button"
-            onClick={() => setProgressEditing(false)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors flex-shrink-0"
-            aria-label="Cancel"
+            onClick={(e) => { e.stopPropagation(); skipDuration(); }}
+            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-lg hover:bg-muted transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            Skip
           </button>
           <button
             type="submit"
-            className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all flex-shrink-0"
-            aria-label="Save progress"
+            className="text-xs font-medium text-primary hover:text-primary/80 px-2 py-1 rounded-lg hover:bg-primary/10 transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+            Save
           </button>
         </form>
       )}

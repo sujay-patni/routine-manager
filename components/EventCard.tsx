@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition, useState } from "react";
+import { useTransition, useState, useRef } from "react";
 import { setEventCompleted } from "@/app/actions/events";
 import type { TodayEvent } from "@/app/actions/events";
 import { Badge } from "@/components/ui/badge";
@@ -38,20 +38,64 @@ function formatTime(timeStr: string | null): string {
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
+function computeDefaultDuration(event: TodayEvent): number | null {
+  if (event.duration_minutes != null) return event.duration_minutes;
+  if (event.event_type === "timed" && event.start_time && event.end_time) {
+    const diff = new Date(event.end_time).getTime() - new Date(event.start_time).getTime();
+    if (diff > 0) return Math.round(diff / 60000);
+  }
+  return null;
+}
+
 export default function EventCard({ event, onDoneChange, onEdit, onView }: EventCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(event.is_completed);
+  const [showDurationPunch, setShowDurationPunch] = useState(false);
+  const [durationInput, setDurationInput] = useState("");
+  const durationRef = useRef<HTMLInputElement>(null);
 
   const isDeadline = event.event_type === "deadline";
   const isAllDay = event.event_type === "all_day";
 
-  function toggleComplete() {
-    const nextDone = !localDone;
-    setLocalDone(nextDone);
-    onDoneChange?.(event.id, nextDone);
+  function dispatchComplete(durationActual?: number) {
+    setLocalDone(true);
+    onDoneChange?.(event.id, true);
     startTransition(async () => {
-      await setEventCompleted(event.id, nextDone);
+      await setEventCompleted(event.id, true, durationActual);
     });
+  }
+
+  function toggleComplete() {
+    if (localDone) {
+      // Uncompleting
+      setLocalDone(false);
+      setShowDurationPunch(false);
+      onDoneChange?.(event.id, false);
+      startTransition(async () => {
+        await setEventCompleted(event.id, false);
+      });
+      return;
+    }
+
+    const defaultDur = computeDefaultDuration(event);
+    if (defaultDur != null) {
+      setDurationInput(String(defaultDur));
+      setShowDurationPunch(true);
+      setTimeout(() => durationRef.current?.focus(), 50);
+    } else {
+      dispatchComplete();
+    }
+  }
+
+  function saveDuration() {
+    const val = parseInt(durationInput, 10);
+    setShowDurationPunch(false);
+    dispatchComplete(isNaN(val) || val <= 0 ? undefined : val);
+  }
+
+  function skipDuration() {
+    setShowDurationPunch(false);
+    dispatchComplete();
   }
 
   function getSubtitle(): string {
@@ -81,6 +125,7 @@ export default function EventCard({ event, onDoneChange, onEdit, onView }: Event
     return "";
   }
 
+  const defaultDur = computeDefaultDuration(event);
   const icon = isDeadline
     ? event.isOverdue ? "🔴" : "⏰"
     : isAllDay ? "📋"
@@ -88,14 +133,14 @@ export default function EventCard({ event, onDoneChange, onEdit, onView }: Event
 
   return (
     <div
-      onClick={onView}
+      onClick={showDurationPunch ? undefined : onView}
       className={cn(
         "flex flex-col gap-0 p-4 rounded-2xl border bg-card card-elevated transition-all",
-        localDone && "opacity-50",
+        localDone && !showDurationPunch && "opacity-50",
         isDeadline && event.isOverdue && "border-red-200 bg-red-50/40 dark:border-red-900 dark:bg-red-950/20",
         isDeadline && !event.isOverdue && event.daysUntilDue === 0 && "border-orange-200 dark:border-orange-900",
         isPending && "opacity-70",
-        onView && "cursor-pointer"
+        onView && !showDurationPunch && "cursor-pointer"
       )}
     >
       <div className="flex items-start gap-3">
@@ -122,11 +167,14 @@ export default function EventCard({ event, onDoneChange, onEdit, onView }: Event
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-base leading-none">{icon}</span>
-            <span className={cn("font-semibold text-sm", localDone && "line-through text-muted-foreground")}>
+            <span className={cn("font-semibold text-sm", localDone && !showDurationPunch && "line-through text-muted-foreground")}>
               {event.title}
             </span>
             {event.is_recurring && (
               <span className="text-xs text-muted-foreground">↺</span>
+            )}
+            {defaultDur != null && !localDone && (
+              <span className="text-xs text-muted-foreground/60">~{defaultDur}m</span>
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">{getSubtitle()}</p>
@@ -153,6 +201,39 @@ export default function EventCard({ event, onDoneChange, onEdit, onView }: Event
           )}
         </div>
       </div>
+
+      {/* Duration punch form */}
+      {showDurationPunch && (
+        <form
+          onSubmit={(e) => { e.preventDefault(); saveDuration(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-2 ml-9 flex items-center gap-2"
+        >
+          <span className="text-xs text-muted-foreground">⏱</span>
+          <input
+            ref={durationRef}
+            type="number"
+            min="1"
+            value={durationInput}
+            onChange={(e) => setDurationInput(e.target.value)}
+            className="w-16 text-sm border rounded-md px-2 py-1 bg-background"
+          />
+          <span className="text-xs text-muted-foreground">min</span>
+          <button
+            type="submit"
+            className="text-xs font-medium text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={skipDuration}
+            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-muted transition-colors"
+          >
+            Skip
+          </button>
+        </form>
+      )}
     </div>
   );
 }

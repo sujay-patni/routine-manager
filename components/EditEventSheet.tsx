@@ -68,6 +68,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   // Shared fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [duration, setDuration] = useState(event?.duration_minutes != null ? String(event.duration_minutes) : "");
 
   // Timed-specific
   const [eventDate, setEventDate] = useState("");
@@ -88,6 +89,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     if (!e) return;
     setTitle(e.title);
     setDescription(e.description ?? "");
+    setDuration(e.duration_minutes != null ? String(e.duration_minutes) : "");
     setError(null);
     setDeleteMode("none");
 
@@ -120,6 +122,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     const data: Parameters<typeof updateEvent>[1] = {
       title,
       description: description || undefined,
+      duration_minutes: duration ? Number(duration) : null,
     };
 
     if (event.event_type === "timed") {
@@ -293,6 +296,18 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
               </div>
             </>
           )}
+
+          {/* Duration */}
+          <div className="space-y-2">
+            <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              type="number"
+              min={1}
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder="e.g. 60"
+            />
+          </div>
 
           <Button type="submit" className="w-full" disabled={isPending}>
             {isPending ? "Saving…" : "Save changes"}

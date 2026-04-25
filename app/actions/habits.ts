@@ -5,6 +5,7 @@ import {
   getAllHabits as notionGetAllHabits,
   getAllHabitsIncludingInactive,
   getCompletionsForWeek,
+  getCompletionsForDate,
   createCompletion,
   findAndDeleteCompletion,
   findCompletion,
@@ -13,6 +14,7 @@ import {
   updateHabit as notionUpdateHabit,
   deleteHabit as notionDeleteHabit,
   ensureHabitSortOrderColumn,
+  ensureHabitDurationColumns,
 } from "@/lib/notion/habits";
 import {
   getWeekBoundaries,
@@ -195,8 +197,8 @@ export async function getTodayHabits(dateStr?: string) {
   };
 }
 
-export async function completeHabit(habitId: string, date: string, habitName = "") {
-  await createCompletion(habitId, date, habitName);
+export async function completeHabit(habitId: string, date: string, habitName = "", durationActual?: number) {
+  await createCompletion(habitId, date, habitName, undefined, durationActual);
   revalidateTag("completions", {});
   revalidatePath("/today");
   revalidatePath("/weekly");
@@ -215,14 +217,15 @@ export async function logHabitProgress(
   habitId: string,
   date: string,
   habitName: string,
-  progressValue: number
+  progressValue: number,
+  durationActual?: number
 ) {
   try {
     const existing = await findCompletion(habitId, date);
     if (existing) {
-      await updateCompletionProgress(existing.id, progressValue);
+      await updateCompletionProgress(existing.id, progressValue, durationActual);
     } else {
-      await createCompletion(habitId, date, habitName, progressValue);
+      await createCompletion(habitId, date, habitName, progressValue, durationActual);
     }
     revalidateTag("completions", {});
     revalidatePath("/today");
@@ -245,6 +248,8 @@ export async function createHabit(data: {
   progress_target?: number;
   progress_start?: number;
   progress_period?: string;
+  progress_conversion?: number;
+  duration_minutes?: number;
 }) {
   const hasProgress = data.progress_metric || data.progress_target != null;
   try {
@@ -259,30 +264,52 @@ export async function createHabit(data: {
     return { success: true };
   } catch (e) {
     const msg = String(e);
-    if (
-      hasProgress &&
-      (msg.includes("is not a property that exists") || msg.includes("not a property"))
-    ) {
+    if (msg.includes("is not a property that exists") || msg.includes("not a property")) {
       try {
+        await ensureHabitDurationColumns();
         await notionCreateHabit({
           ...data,
           weekly_target:
             data.frequency === "weekly" ? (data.weekly_target ?? 3) : data.weekly_target,
-          progress_metric: undefined,
-          progress_target: undefined,
-          progress_start: undefined,
-          progress_period: undefined,
+          ...(hasProgress ? {} : {
+            progress_metric: undefined,
+            progress_target: undefined,
+            progress_start: undefined,
+            progress_period: undefined,
+            progress_conversion: undefined,
+          }),
         });
         revalidateTag("habits", {});
         revalidatePath("/today");
         revalidatePath("/settings");
-        return {
-          success: true,
-          warning:
-            "Habit added, but progress tracking was skipped — your Notion Habits database is missing these columns: Progress Metric (text), Progress Target (number), Progress Start (number), Progress Period (select). Add them in Notion, then edit this habit to enable progress tracking.",
-        };
-      } catch (e2) {
-        return { error: String(e2) };
+        return { success: true };
+      } catch {
+        if (hasProgress) {
+          try {
+            await notionCreateHabit({
+              ...data,
+              weekly_target:
+                data.frequency === "weekly" ? (data.weekly_target ?? 3) : data.weekly_target,
+              progress_metric: undefined,
+              progress_target: undefined,
+              progress_start: undefined,
+              progress_period: undefined,
+              progress_conversion: undefined,
+              duration_minutes: undefined,
+            });
+            revalidateTag("habits", {});
+            revalidatePath("/today");
+            revalidatePath("/settings");
+            return {
+              success: true,
+              warning:
+                "Habit added, but progress tracking was skipped — your Notion Habits database is missing these columns: Progress Metric (text), Progress Target (number), Progress Start (number), Progress Period (select). Add them in Notion, then edit this habit to enable progress tracking.",
+            };
+          } catch (e3) {
+            return { error: String(e3) };
+          }
+        }
+        return { error: msg };
       }
     }
     return { error: msg };
@@ -304,14 +331,18 @@ export async function updateHabit(
     progress_target: number | null;
     progress_start: number | null;
     progress_period: string | null;
+    progress_conversion: number | null;
+    duration_minutes: number | null;
     sort_order: number | null;
   }>
 ) {
-  const hasProgressFields =
+  const hasNewFields =
     data.progress_metric !== undefined ||
     data.progress_target !== undefined ||
     data.progress_start !== undefined ||
-    data.progress_period !== undefined;
+    data.progress_period !== undefined ||
+    data.progress_conversion !== undefined ||
+    data.duration_minutes !== undefined;
 
   try {
     await notionUpdateHabit(id, data);
@@ -322,11 +353,10 @@ export async function updateHabit(
     return { success: true };
   } catch (e) {
     const msg = String(e);
-    if (hasProgressFields && (msg.includes("is not a property that exists") || msg.includes("not a property"))) {
+    if (hasNewFields && (msg.includes("is not a property that exists") || msg.includes("not a property"))) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { progress_metric, progress_target, progress_start, progress_period, ...safeData } = data;
-        await notionUpdateHabit(id, safeData);
+        await ensureHabitDurationColumns();
+        await notionUpdateHabit(id, data);
         revalidateTag("habits", {});
         revalidatePath("/today");
         revalidatePath("/settings");
@@ -416,4 +446,68 @@ export async function getWeeklySummary() {
     weekStart: weekStartStr,
     weekEnd: weekEndStr,
   };
+}
+
+export interface DayLogHabitEntry {
+  habit_id: string;
+  habit_name: string;
+  progress_metric: string | null;
+  progress_value: number | null; // today's total progress value
+  duration_actual: number | null; // total time in minutes for this date
+}
+
+export interface DayLogResult {
+  date: string;
+  habitEntries: DayLogHabitEntry[];
+  totalTrackedMinutes: number;
+}
+
+export async function getDayLog(dateStr: string): Promise<DayLogResult> {
+  const settings = await getSettings();
+  const { timezone } = settings;
+
+  // Resolve effective date (handles late-night: dateStr is already the effective date)
+  const targetDate = parseZonedOrLocal(dateStr, timezone);
+  const todayStr = formatDateForDB(targetDate);
+
+  const [completions, habits] = await Promise.all([
+    getCompletionsForDate(todayStr),
+    cachedGetAllHabits(),
+  ]);
+
+  const habitMap = new Map(habits.map(h => [h.id, h]));
+  const grouped = new Map<string, { progress_value: number; duration_actual: number | null }>();
+
+  for (const c of completions) {
+    const existing = grouped.get(c.habit_id);
+    if (existing) {
+      existing.progress_value += c.progress_value ?? 0;
+      if (c.duration_actual != null) {
+        existing.duration_actual = (existing.duration_actual ?? 0) + c.duration_actual;
+      }
+    } else {
+      grouped.set(c.habit_id, {
+        progress_value: c.progress_value ?? 0,
+        duration_actual: c.duration_actual ?? null,
+      });
+    }
+  }
+
+  const habitEntries: DayLogHabitEntry[] = [];
+  let totalTrackedMinutes = 0;
+
+  for (const [habitId, agg] of grouped) {
+    const habit = habitMap.get(habitId);
+    const durationMins = agg.duration_actual ?? null;
+    habitEntries.push({
+      habit_id: habitId,
+      habit_name: habit?.name ?? habitId,
+      progress_metric: habit?.progress_metric ?? null,
+      progress_value: habit?.progress_metric ? agg.progress_value : null,
+      duration_actual: durationMins,
+    });
+    if (durationMins != null) totalTrackedMinutes += durationMins;
+  }
+
+  return { date: todayStr, habitEntries, totalTrackedMinutes };
 }

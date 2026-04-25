@@ -14,6 +14,11 @@ import type { Habit, HabitFrequency } from "@/lib/notion/types";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/components/SettingsProvider";
+
+function isTimeUnit(unit: string) {
+  return unit === "mins" || unit === "hrs";
+}
 
 interface EditHabitSheetProps {
   habit: Habit | null;
@@ -44,6 +49,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(true);
+  const settings = useSettings();
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -81,7 +87,9 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
 
   // Progress fields
   const [progressOn, setProgressOn] = useState(!!habit?.progress_metric);
-  const [metric, setMetric] = useState(habit?.progress_metric ?? "");
+  const [metric, setMetric] = useState(habit?.progress_metric ?? "mins");
+  const [conversion, setConversion] = useState(String(habit?.progress_conversion ?? "1"));
+  const [duration, setDuration] = useState(habit?.duration_minutes != null ? String(habit.duration_minutes) : "");
   const [target, setTarget] = useState(String(habit?.progress_target ?? ""));
   const [start, setStart] = useState(String(habit?.progress_start ?? 0));
   const [progressPeriod, setProgressPeriod] = useState<"daily" | "weekly" | "monthly" | "yearly">(
@@ -117,7 +125,9 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
         : [{ month: "01", day: "01" }]
     );
     setProgressOn(!!h?.progress_metric);
-    setMetric(h?.progress_metric ?? "");
+    setMetric(h?.progress_metric ?? "mins");
+    setConversion(String(h?.progress_conversion ?? "1"));
+    setDuration(h?.duration_minutes != null ? String(h.duration_minutes) : "");
     setTarget(String(h?.progress_target ?? ""));
     setStart(String(h?.progress_start ?? 0));
     setProgressPeriod((h?.progress_period as "daily" | "weekly" | "monthly" | "yearly") ?? "daily");
@@ -179,6 +189,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     if (!name.trim()) { setError("Name is required"); return; }
     setError(null);
 
+    const conversionVal = progressOn && !isTimeUnit(metric) ? Number(conversion) : null;
     const payload = {
       name: name.trim(),
       description: desc || null,
@@ -189,6 +200,8 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
       progress_target: progressOn && target ? Number(target) : null,
       progress_start: progressOn ? Number(start) : null,
       progress_period: progressOn ? progressPeriod : null,
+      progress_conversion: conversionVal && !isNaN(conversionVal) ? conversionVal : null,
+      duration_minutes: duration ? Number(duration) : null,
       time_of_day: showExact ? null : (timeOfDay as Habit["time_of_day"]) || null,
       exact_time: showExact ? exactTime || null : null,
     };
@@ -263,9 +276,33 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Unit</Label>
-                  <Input value={metric} onChange={e => setMetric(e.target.value)} placeholder="steps" />
+                  <Select value={metric} onValueChange={v => { if (v) { setMetric(v); setConversion("1"); } }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {settings.progress_units.map(u => (
+                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
+              {!isTimeUnit(metric) && (
+                <div className="space-y-1">
+                  <Label className="text-xs">1 {metric || "unit"} =</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      value={conversion}
+                      onChange={e => setConversion(e.target.value)}
+                      placeholder="1"
+                      className="w-24"
+                    />
+                    <span className="text-xs text-muted-foreground">min</span>
+                  </div>
+                </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs">Progress resets</Label>
                 <Select value={progressPeriod} onValueChange={v => v && setProgressPeriod(v as typeof progressPeriod)}>
@@ -447,6 +484,18 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
               </SelectContent>
             </Select>
           )}
+        </div>
+
+        {/* Default duration */}
+        <div className="space-y-2">
+          <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+          <Input
+            type="number"
+            min={1}
+            value={duration}
+            onChange={e => setDuration(e.target.value)}
+            placeholder="e.g. 30"
+          />
         </div>
 
         <Button type="submit" className="w-full" disabled={isPending}>
