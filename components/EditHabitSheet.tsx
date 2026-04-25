@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updateHabit, deleteHabit } from "@/app/actions/habits";
-import type { Habit, HabitFrequency } from "@/lib/notion/types";
+import type { Habit, HabitFrequency, Group } from "@/lib/notion/types";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ interface EditHabitSheetProps {
   onOpenChange: (open: boolean) => void;
   dispatchHabit?: (action: OptimisticAction<ProcessedHabit>) => void;
   onSaved?: () => void;
+  groups?: Group[];
 }
 
 const DAYS_OF_WEEK = [
@@ -38,7 +39,7 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabit, onSaved }: EditHabitSheetProps) {
+export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabit, onSaved, groups = [] }: EditHabitSheetProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -93,6 +94,9 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   const [timeOfDay, setTimeOfDay] = useState(habit?.time_of_day ?? "");
   const [exactTime, setExactTime] = useState(habit?.exact_time ?? "");
 
+  // Group
+  const [groupId, setGroupId] = useState(habit?.group_id ?? "");
+
   function resetToHabit(h: Habit | null) {
     setName(h?.name ?? "");
     setDesc(h?.description ?? "");
@@ -124,6 +128,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     setShowExact(!!h?.exact_time);
     setTimeOfDay(h?.time_of_day ?? "");
     setExactTime(h?.exact_time ?? "");
+    setGroupId(h?.group_id ?? "");
     setError(null);
     setConfirmDelete(false);
   }
@@ -191,6 +196,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
       progress_period: progressOn ? progressPeriod : null,
       time_of_day: showExact ? null : (timeOfDay as Habit["time_of_day"]) || null,
       exact_time: showExact ? exactTime || null : null,
+      group_id: groupId || null,
     };
 
     if (habit.id.startsWith("temp-")) return;
@@ -448,6 +454,30 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
             </Select>
           )}
         </div>
+
+        {groups.length > 0 && (
+          <div className="space-y-2">
+            <Label>Group</Label>
+            <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+              <SelectTrigger>
+                <SelectValue>
+                  {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">None</SelectItem>
+                {groups.map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                      {g.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <Button type="submit" className="w-full" disabled={isPending}>
           {isPending ? "Saving…" : "Save changes"}

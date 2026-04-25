@@ -245,6 +245,7 @@ export async function createHabit(data: {
   progress_target?: number;
   progress_start?: number;
   progress_period?: string;
+  group_id?: string | null;
 }) {
   const hasProgress = data.progress_metric || data.progress_target != null;
   try {
@@ -305,6 +306,7 @@ export async function updateHabit(
     progress_start: number | null;
     progress_period: string | null;
     sort_order: number | null;
+    group_id: string | null;
   }>
 ) {
   const hasProgressFields =

@@ -5,9 +5,11 @@ import { setEventCompleted } from "@/app/actions/events";
 import type { TodayEvent } from "@/app/actions/events";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import type { Group } from "@/lib/notion/types";
 
 interface EventCardProps {
   event: TodayEvent;
+  groups?: Group[];
   onDoneChange?: (id: string, done: boolean) => void;
   onEdit?: () => void;
   onView?: () => void;
@@ -38,7 +40,7 @@ function formatTime(timeStr: string | null): string {
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-export default function EventCard({ event, onDoneChange, onEdit, onView }: EventCardProps) {
+export default function EventCard({ event, groups, onDoneChange, onEdit, onView }: EventCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(event.is_completed);
 
@@ -86,6 +88,8 @@ export default function EventCard({ event, onDoneChange, onEdit, onView }: Event
     : isAllDay ? "📋"
     : "📅";
 
+  const groupColor = groups?.find((g) => g.id === event.group_id)?.color ?? null;
+
   return (
     <div
       onClick={onView}
@@ -97,6 +101,7 @@ export default function EventCard({ event, onDoneChange, onEdit, onView }: Event
         isPending && "opacity-70",
         onView && "cursor-pointer"
       )}
+      style={groupColor ? { borderLeftWidth: "3px", borderLeftColor: groupColor } : undefined}
     >
       <div className="flex items-start gap-3">
         {/* Complete button */}
