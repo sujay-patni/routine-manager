@@ -24,6 +24,7 @@ function pageToHabit(page: any): Habit {
     progress_start: props["Progress Start"]?.number ?? null,
     progress_period: (getSelect(props["Progress Period"]) as ProgressPeriod) || null,
     progress_conversion: props["Progress Conversion"]?.number ?? null,
+    progress_conversion_base: props["Progress Conversion Base"]?.number ?? null,
     duration_minutes: props["Duration"]?.number ?? null,
     sort_order: props["Sort Order"]?.number ?? null,
   };
@@ -156,6 +157,7 @@ export async function ensureHabitDurationColumns(): Promise<void> {
     properties: {
       "Duration": { number: {} },
       "Progress Conversion": { number: {} },
+      "Progress Conversion Base": { number: {} },
     },
   });
 }
@@ -283,6 +285,7 @@ export async function createHabit(data: {
   progress_start?: number;
   progress_period?: string;
   progress_conversion?: number;
+  progress_conversion_base?: number;
   duration_minutes?: number;
   sort_order?: number;
 }): Promise<Habit> {
@@ -304,6 +307,7 @@ export async function createHabit(data: {
   if (data.progress_start != null) props["Progress Start"] = { number: data.progress_start };
   if (data.progress_period) props["Progress Period"] = { select: { name: data.progress_period } };
   if (data.progress_conversion != null) props["Progress Conversion"] = { number: data.progress_conversion };
+  if (data.progress_conversion_base != null) props["Progress Conversion Base"] = { number: data.progress_conversion_base };
   if (data.duration_minutes != null) props["Duration"] = { number: data.duration_minutes };
   if (data.sort_order != null) props["Sort Order"] = { number: data.sort_order };
 
@@ -337,6 +341,7 @@ export async function updateHabit(
     progress_start: number | null;
     progress_period: string | null;
     progress_conversion: number | null;
+    progress_conversion_base: number | null;
     duration_minutes: number | null;
     sort_order: number | null;
   }>
@@ -357,6 +362,7 @@ export async function updateHabit(
   if (data.progress_start !== undefined) props["Progress Start"] = { number: data.progress_start };
   if (data.progress_period !== undefined) props["Progress Period"] = data.progress_period ? { select: { name: data.progress_period } } : { select: null };
   if (data.progress_conversion !== undefined) props["Progress Conversion"] = { number: data.progress_conversion };
+  if (data.progress_conversion_base !== undefined) props["Progress Conversion Base"] = { number: data.progress_conversion_base };
   if (data.duration_minutes !== undefined) props["Duration"] = { number: data.duration_minutes };
   if (data.sort_order !== undefined) props["Sort Order"] = { number: data.sort_order };
 

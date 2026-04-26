@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getDayLog } from "@/app/actions/habits";
 import type { DayLogResult } from "@/app/actions/habits";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface Props {
   open: boolean;
@@ -21,22 +22,23 @@ function formatMinutes(min: number): string {
 
 export default function DayLogSheet({ open, onOpenChange, dateStr }: Props) {
   const [log, setLog] = useState<DayLogResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!open) return;
+    startTransition(() => {
+      setError(null);
+      setLog(null);
+    });
     startTransition(async () => {
-      const result = await getDayLog(dateStr);
-      setLog(result);
+      try {
+        const result = await getDayLog(dateStr);
+        setLog(result);
+      } catch (e) {
+        setError(String(e));
+      }
     });
   }, [open, dateStr]);
 
@@ -44,6 +46,10 @@ export default function DayLogSheet({ open, onOpenChange, dateStr }: Props) {
     <div className="space-y-5 pt-1">
       {isPending && (
         <p className="text-sm text-muted-foreground text-center py-4">Loading…</p>
+      )}
+
+      {!isPending && error && (
+        <p className="text-sm text-destructive text-center py-4">{error}</p>
       )}
 
       {!isPending && log && (
@@ -65,9 +71,7 @@ export default function DayLogSheet({ open, onOpenChange, dateStr }: Props) {
                       )}
                     </div>
                     <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {entry.duration_actual != null
-                        ? formatMinutes(entry.duration_actual)
-                        : "—"}
+                      {entry.duration_actual != null ? formatMinutes(entry.duration_actual) : "—"}
                     </span>
                   </div>
                 ))}
@@ -75,8 +79,33 @@ export default function DayLogSheet({ open, onOpenChange, dateStr }: Props) {
             </section>
           )}
 
-          {log.habitEntries.length === 0 && !isPending && (
-            <p className="text-sm text-muted-foreground text-center py-4">No habits completed on this day.</p>
+          {/* Event entries */}
+          {log.eventEntries.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Events & Tasks</h3>
+              <div className="space-y-1">
+                {log.eventEntries.map((entry, i) => {
+                  const mins = entry.duration_actual ?? entry.duration_computed;
+                  return (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border bg-card">
+                      <span className="text-sm">📅</span>
+                      <span className="flex-1 text-sm font-medium truncate">{entry.event_title}</span>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                        {entry.duration_actual != null
+                          ? formatMinutes(entry.duration_actual)
+                          : mins != null
+                          ? `~${formatMinutes(mins)}`
+                          : "—"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {log.habitEntries.length === 0 && log.eventEntries.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">Nothing completed on this day.</p>
           )}
 
           {/* Summary footer */}
@@ -91,7 +120,7 @@ export default function DayLogSheet({ open, onOpenChange, dateStr }: Props) {
         </>
       )}
 
-      {!isPending && !log && (
+      {!isPending && !log && !error && (
         <p className="text-sm text-muted-foreground text-center py-4">No data for this day.</p>
       )}
     </div>

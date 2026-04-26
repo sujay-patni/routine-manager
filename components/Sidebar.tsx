@@ -16,7 +16,7 @@ export default function Sidebar() {
   return (
     <aside className="hidden lg:flex flex-col fixed left-0 top-0 h-full w-56 border-r bg-sidebar z-40">
       {/* Logo / brand */}
-      <div className="px-5 py-6 border-b">
+      <div className="px-5 py-6">
         <h1 className="text-lg font-bold tracking-tight text-foreground">Routine</h1>
         <p className="text-xs text-muted-foreground mt-0.5">Your daily system</p>
       </div>

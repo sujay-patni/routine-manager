@@ -6,7 +6,7 @@ import {
   eachDayOfInterval, format, isSameMonth, isSameDay, isSameWeek, isSameYear,
   addMonths, addWeeks, addDays,
   addYears, isToday,
-  getMonth, getYear, parseISO,
+  getYear, parseISO,
 } from "date-fns";
 // removed toZonedTime import
 import { parseZonedOrLocal } from "@/lib/habit-logic";
@@ -91,7 +91,6 @@ export default function CalendarClient({ events }: Props) {
   const { timezone, week_start_day: weekStartDay } = useSettings();
   const [view, setView] = useState<CalendarView>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editingEvent, setEditingEvent] = useState<AppEvent | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -127,19 +126,6 @@ export default function CalendarClient({ events }: Props) {
     else if (view === "week") setCurrentDate((c) => addWeeks(c, d));
     else if (view === "month") setCurrentDate((c) => addMonths(c, d));
     else if (view === "year") setCurrentDate((c) => addYears(c, d));
-  }
-
-  function headerLabel(): string {
-    if (view === "day") return format(currentDate, "EEEE, MMMM d, yyyy");
-    if (view === "week") {
-      const ws = startOfWeek(currentDate, { weekStartsOn });
-      const we = endOfWeek(currentDate, { weekStartsOn });
-      if (getMonth(ws) === getMonth(we)) return format(ws, "MMMM yyyy");
-      return `${format(ws, "MMM")} – ${format(we, "MMM yyyy")}`;
-    }
-    if (view === "month") return format(currentDate, "MMMM yyyy");
-    if (view === "year") return format(currentDate, "yyyy");
-    return "Schedule";
   }
 
   // Index events by date

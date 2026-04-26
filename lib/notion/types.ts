@@ -6,6 +6,8 @@ export type HabitFrequency =
   | "specific_dates_monthly"
   | "specific_dates_yearly";
 export type ProgressPeriod = "daily" | "weekly" | "monthly" | "yearly";
+export type SkipScope = "day" | "week";
+export type SkipItemType = "habit" | "event";
 
 export interface Habit {
   id: string;
@@ -26,11 +28,15 @@ export interface Habit {
   progress_target: number | null; // e.g. 10000
   progress_start: number | null;  // e.g. 0
   progress_period: ProgressPeriod | null; // "daily" | "weekly" | "monthly" | "yearly"
-  progress_conversion: number | null; // minutes per unit (for non-time units); null = 1
+  progress_conversion: number | null; // minutes per unit (right/left); null = 1
+  progress_conversion_base: number | null; // the left-side quantity (e.g. 1000 for "1000 steps = 10 mins")
   // duration
   duration_minutes: number | null; // default expected time per completion (minutes)
   // display
   sort_order: number | null;
+  skip_id?: string | null;
+  is_skipped?: boolean;
+  skip_scope?: SkipScope | null;
 }
 
 export interface Completion {
@@ -60,6 +66,19 @@ export interface AppEvent {
   // duration
   duration_minutes: number | null; // default expected time (minutes)
   duration_actual: number | null;  // actual time logged at completion (minutes)
+  skip_id?: string | null;
+  is_skipped?: boolean;
+  skip_scope?: SkipScope | null;
+}
+
+export interface SkipRecord {
+  id: string;
+  item_type: SkipItemType;
+  item_id: string;
+  scope: SkipScope;
+  date: string | null;
+  week_start: string | null;
+  week_end: string | null;
 }
 
 export interface AppSettings {

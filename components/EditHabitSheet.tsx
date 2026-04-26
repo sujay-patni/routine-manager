@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,6 +15,7 @@ import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/components/SettingsProvider";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 function isTimeUnit(unit: string) {
   return unit === "mins" || unit === "hrs";
@@ -48,16 +49,8 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   const [isPending, startTransition] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(true);
+  const isMobile = useIsMobile();
   const settings = useSettings();
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
 
   // Core fields
   const [name, setName] = useState(habit?.name ?? "");
@@ -88,7 +81,12 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   // Progress fields
   const [progressOn, setProgressOn] = useState(!!habit?.progress_metric);
   const [metric, setMetric] = useState(habit?.progress_metric ?? "mins");
-  const [conversion, setConversion] = useState(String(habit?.progress_conversion ?? "1"));
+  const [convLeft, setConvLeft] = useState(String(habit?.progress_conversion_base ?? 1));
+  const [convRight, setConvRight] = useState(() => {
+    const base = habit?.progress_conversion_base ?? 1;
+    const rate = habit?.progress_conversion ?? 1;
+    return String(Math.round(base * rate * 10000) / 10000);
+  });
   const [duration, setDuration] = useState(habit?.duration_minutes != null ? String(habit.duration_minutes) : "");
   const [target, setTarget] = useState(String(habit?.progress_target ?? ""));
   const [start, setStart] = useState(String(habit?.progress_start ?? 0));
@@ -126,7 +124,10 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     );
     setProgressOn(!!h?.progress_metric);
     setMetric(h?.progress_metric ?? "mins");
-    setConversion(String(h?.progress_conversion ?? "1"));
+    const base = h?.progress_conversion_base ?? 1;
+    const rate = h?.progress_conversion ?? 1;
+    setConvLeft(String(base));
+    setConvRight(String(Math.round(base * rate * 10000) / 10000));
     setDuration(h?.duration_minutes != null ? String(h.duration_minutes) : "");
     setTarget(String(h?.progress_target ?? ""));
     setStart(String(h?.progress_start ?? 0));
@@ -189,7 +190,9 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     if (!name.trim()) { setError("Name is required"); return; }
     setError(null);
 
-    const conversionVal = progressOn && !isTimeUnit(metric) ? Number(conversion) : null;
+    const cLeft = Number(convLeft) || 1;
+    const cRight = Number(convRight) || 1;
+    const conversionVal = progressOn && !isTimeUnit(metric) ? cRight / cLeft : null;
     const payload = {
       name: name.trim(),
       description: desc || null,
@@ -201,6 +204,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
       progress_start: progressOn ? Number(start) : null,
       progress_period: progressOn ? progressPeriod : null,
       progress_conversion: conversionVal && !isNaN(conversionVal) ? conversionVal : null,
+      progress_conversion_base: progressOn && !isTimeUnit(metric) ? cLeft : null,
       duration_minutes: duration ? Number(duration) : null,
       time_of_day: showExact ? null : (timeOfDay as Habit["time_of_day"]) || null,
       exact_time: showExact ? exactTime || null : null,
@@ -276,10 +280,10 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Unit</Label>
-                  <Select value={metric} onValueChange={v => { if (v) { setMetric(v); setConversion("1"); } }}>
+                  <Select value={metric} onValueChange={v => { if (v) { setMetric(v); setConvLeft("1"); setConvRight("1"); } }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {settings.progress_units.map(u => (
+                      {(settings.progress_units ?? ["mins", "hrs"]).map(u => (
                         <SelectItem key={u} value={u}>{u}</SelectItem>
                       ))}
                     </SelectContent>
@@ -288,16 +292,26 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
               </div>
               {!isTimeUnit(metric) && (
                 <div className="space-y-1">
-                  <Label className="text-xs">1 {metric || "unit"} =</Label>
+                  <Label className="text-xs">Conversion</Label>
                   <div className="flex items-center gap-2">
                     <Input
                       type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={conversion}
-                      onChange={e => setConversion(e.target.value)}
+                      min={0.01}
+                      step={0.01}
+                      value={convLeft}
+                      onChange={e => setConvLeft(e.target.value)}
                       placeholder="1"
-                      className="w-24"
+                      className="w-16"
+                    />
+                    <span className="text-xs text-muted-foreground">{metric || "unit"} =</span>
+                    <Input
+                      type="number"
+                      min={0.01}
+                      step={0.01}
+                      value={convRight}
+                      onChange={e => setConvRight(e.target.value)}
+                      placeholder="1"
+                      className="w-16"
                     />
                     <span className="text-xs text-muted-foreground">min</span>
                   </div>
@@ -486,17 +500,19 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
           )}
         </div>
 
-        {/* Default duration */}
-        <div className="space-y-2">
-          <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
-          <Input
-            type="number"
-            min={1}
-            value={duration}
-            onChange={e => setDuration(e.target.value)}
-            placeholder="e.g. 30"
-          />
-        </div>
+        {/* Default duration — hidden for progress habits (time is tracked via units/conversion) */}
+        {!progressOn && (
+          <div className="space-y-2">
+            <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              type="number"
+              min={1}
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              placeholder="e.g. 30"
+            />
+          </div>
+        )}
 
         <Button type="submit" className="w-full" disabled={isPending}>
           {isPending ? "Saving…" : "Save changes"}

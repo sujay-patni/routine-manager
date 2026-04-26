@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Habit } from "@/lib/notion/types";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface HabitDetailSheetProps {
   habit: Habit | null;
@@ -53,15 +53,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 }
 
 export default function HabitDetailSheet({ habit, open, onOpenChange, onEdit }: HabitDetailSheetProps) {
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   if (!habit) return null;
 

@@ -20,12 +20,19 @@ import {
   getWeekBoundaries,
   getWeekBoundariesForDate,
   formatDateForDB,
+  isHabitScheduledForDay,
   processHabits,
   parseZonedOrLocal,
 } from "@/lib/habit-logic";
+import {
+  createSkip,
+  deleteSkip,
+  getSkipsForWindow,
+} from "@/lib/notion/skips";
 import { getSettings } from "@/app/actions/settings";
+import { getTodayEvents } from "@/app/actions/events";
 import { toZonedTime } from "date-fns-tz";
-import type { Habit, HabitFrequency, ProgressPeriod } from "@/lib/notion/types";
+import type { Habit, HabitFrequency, ProgressPeriod, SkipScope } from "@/lib/notion/types";
 
 export type { Habit };
 
@@ -41,6 +48,11 @@ const cachedGetAllHabitsIncludingInactive = unstable_cache(getAllHabitsIncluding
 
 const cachedGetCompletionsForWeek = unstable_cache(getCompletionsForWeek, ["completions"], {
   tags: ["completions"],
+  revalidate: 60,
+});
+
+const cachedGetSkipsForWindow = unstable_cache(getSkipsForWindow, ["skips-window"], {
+  tags: ["skips"],
   revalidate: 60,
 });
 
@@ -63,6 +75,10 @@ function getPeriodStart(
     default:
       return todayStr; // "daily" — just today
   }
+}
+
+function habitSkipScope(frequency: HabitFrequency): SkipScope {
+  return frequency === "weekly" ? "week" : "day";
 }
 
 export async function getTodayHabits(dateStr?: string) {
@@ -110,7 +126,10 @@ export async function getTodayHabits(dateStr?: string) {
     fetchStart = todayStr.slice(0, 7) + "-01";
   }
 
-  const completions = await cachedGetCompletionsForWeek(fetchStart, weekEndStr);
+  const [completions, skips] = await Promise.all([
+    cachedGetCompletionsForWeek(fetchStart, weekEndStr),
+    cachedGetSkipsForWindow(todayStr, weekStartStr, weekEndStr),
+  ]);
 
   // Only include habits that existed on or before the target date
   const habits = allHabits.filter((h) => {
@@ -119,6 +138,27 @@ export async function getTodayHabits(dateStr?: string) {
   });
 
   const rawHabits = habits.map((h) => {
+    const skip = skips.find((s) =>
+      s.item_type === "habit" &&
+      s.item_id === h.id &&
+      (
+        (s.scope === "day" && s.date === todayStr) ||
+        (s.scope === "week" && s.week_start === weekStartStr && s.week_end === weekEndStr)
+      )
+    );
+    const skippedDatesForWeek = skips
+      .filter((s) =>
+        s.item_type === "habit" &&
+        s.item_id === h.id &&
+        (
+          (s.scope === "day" && s.date != null && s.date >= weekStartStr && s.date <= weekEndStr) ||
+          (s.scope === "week" && s.week_start === weekStartStr && s.week_end === weekEndStr)
+        )
+      )
+      .flatMap((s) => {
+        if (s.scope === "day") return s.date ? [s.date] : [];
+        return [weekStartStr];
+      });
     // All completions for this habit in the fetched range
     const allHabitCompletions = completions.filter((c) => c.habit_id === h.id);
     // Week completions (for weekly target tracking)
@@ -150,6 +190,17 @@ export async function getTodayHabits(dateStr?: string) {
         ? weekCompletions.reduce((sum, c) => sum + (c.progress_value ?? 0), 0)
         : null;
 
+    const completedDatesForWeek = (() => {
+      if (h.progress_metric != null && h.progress_target != null && h.progress_period === "daily") {
+        const byDay = new Map<string, number>();
+        for (const c of weekCompletions) {
+          byDay.set(c.date, (byDay.get(c.date) ?? 0) + (c.progress_value ?? 0));
+        }
+        return [...byDay.entries()].filter(([, v]) => v >= h.progress_target!).map(([d]) => d);
+      }
+      return weekCompletions.map((c) => c.date);
+    })();
+
     // completed_today: for progress habits, done when period total >= target
     const completed_today =
       h.progress_metric != null && h.progress_target != null
@@ -160,22 +211,19 @@ export async function getTodayHabits(dateStr?: string) {
 
     return {
       ...h,
-      completions_this_week: weekCompletions.length,
+      completions_this_week: completedDatesForWeek.length,
       completed_today,
       today_progress,
       today_contribution,
       week_progress,
       today_completion_id: todayCompletions[0]?.id ?? null,
-      completions_by_date: (() => {
-        if (h.progress_metric != null && h.progress_target != null && h.progress_period === "daily") {
-          const byDay = new Map<string, number>();
-          for (const c of weekCompletions) {
-            byDay.set(c.date, (byDay.get(c.date) ?? 0) + (c.progress_value ?? 0));
-          }
-          return [...byDay.entries()].filter(([, v]) => v >= h.progress_target!).map(([d]) => d);
-        }
-        return weekCompletions.map((c) => c.date);
-      })(),
+      skip_id: skip?.id ?? null,
+      is_skipped: !!skip,
+      skip_scope: skip?.scope ?? null,
+      completions_by_date: completedDatesForWeek,
+      skipped_dates: h.frequency === "weekly"
+        ? []
+        : skippedDatesForWeek.filter((date) => isHabitScheduledForDay(h, parseZonedOrLocal(date, timezone))),
     };
   });
 
@@ -211,6 +259,44 @@ export async function uncompleteHabit(habitId: string, date: string) {
   revalidatePath("/today");
   revalidatePath("/weekly");
   return { success: true };
+}
+
+export async function skipHabit(data: {
+  habitId: string;
+  habitName: string;
+  frequency: HabitFrequency;
+  date: string;
+  weekStart: string;
+  weekEnd: string;
+}) {
+  try {
+    const scope = habitSkipScope(data.frequency);
+    const skip = await createSkip({
+      item_type: "habit",
+      item_id: data.habitId,
+      item_title: data.habitName,
+      scope,
+      date: data.date,
+      week_start: data.weekStart,
+      week_end: data.weekEnd,
+    });
+    revalidateTag("skips", {});
+    revalidatePath("/today");
+    return { success: true, skip };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+export async function unskipHabit(skipId: string) {
+  try {
+    await deleteSkip(skipId);
+    revalidateTag("skips", {});
+    revalidatePath("/today");
+    return { success: true };
+  } catch (e) {
+    return { error: String(e) };
+  }
 }
 
 export async function logHabitProgress(
@@ -249,6 +335,7 @@ export async function createHabit(data: {
   progress_start?: number;
   progress_period?: string;
   progress_conversion?: number;
+  progress_conversion_base?: number;
   duration_minutes?: number;
 }) {
   const hasProgress = data.progress_metric || data.progress_target != null;
@@ -332,6 +419,7 @@ export async function updateHabit(
     progress_start: number | null;
     progress_period: string | null;
     progress_conversion: number | null;
+    progress_conversion_base: number | null;
     duration_minutes: number | null;
     sort_order: number | null;
   }>
@@ -452,13 +540,21 @@ export interface DayLogHabitEntry {
   habit_id: string;
   habit_name: string;
   progress_metric: string | null;
-  progress_value: number | null; // today's total progress value
-  duration_actual: number | null; // total time in minutes for this date
+  progress_value: number | null;
+  duration_actual: number | null;
+}
+
+export interface DayLogEventEntry {
+  event_id: string;
+  event_title: string;
+  duration_actual: number | null;
+  duration_computed: number | null; // from start/end times
 }
 
 export interface DayLogResult {
   date: string;
   habitEntries: DayLogHabitEntry[];
+  eventEntries: DayLogEventEntry[];
   totalTrackedMinutes: number;
 }
 
@@ -470,9 +566,10 @@ export async function getDayLog(dateStr: string): Promise<DayLogResult> {
   const targetDate = parseZonedOrLocal(dateStr, timezone);
   const todayStr = formatDateForDB(targetDate);
 
-  const [completions, habits] = await Promise.all([
+  const [completions, habits, todayEvents] = await Promise.all([
     getCompletionsForDate(todayStr),
     cachedGetAllHabits(),
+    getTodayEvents(dateStr),
   ]);
 
   const habitMap = new Map(habits.map(h => [h.id, h]));
@@ -509,5 +606,23 @@ export async function getDayLog(dateStr: string): Promise<DayLogResult> {
     if (durationMins != null) totalTrackedMinutes += durationMins;
   }
 
-  return { date: todayStr, habitEntries, totalTrackedMinutes };
+  const eventEntries: DayLogEventEntry[] = [];
+  for (const e of todayEvents) {
+    if (!e.is_completed) continue;
+    let durationComputed: number | null = null;
+    if (e.start_time && e.end_time) {
+      const diff = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 60000;
+      if (diff > 0) durationComputed = Math.round(diff);
+    }
+    const mins = e.duration_actual ?? durationComputed;
+    eventEntries.push({
+      event_id: e.id,
+      event_title: e.title,
+      duration_actual: e.duration_actual ?? null,
+      duration_computed: durationComputed,
+    });
+    if (mins != null) totalTrackedMinutes += mins;
+  }
+
+  return { date: todayStr, habitEntries, eventEntries, totalTrackedMinutes };
 }

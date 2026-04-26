@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events";
 import type { AppEvent } from "@/lib/notion/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface EditEventSheetProps {
   event: AppEvent | null;
@@ -55,15 +56,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   const [isPending, startTransition] = useTransition();
   const [deleteMode, setDeleteMode] = useState<"none" | "confirm_single" | "prompt_recurring">("none");
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   // Shared fields
   const [title, setTitle] = useState("");

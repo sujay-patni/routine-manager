@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath, unstable_cache } from "next/cache";
+import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import {
   getAppSettings,
   createAppSettings,
@@ -27,7 +27,7 @@ const getCachedSettings = unstable_cache(
     return notionSettings ?? getEnvSettings();
   },
   ["app-settings"],
-  { revalidate: 300 }
+  { revalidate: 300, tags: ["app-settings"] }
 );
 
 export async function getSettings(): Promise<AppSettings> {
@@ -41,6 +41,9 @@ export async function saveSettings(data: {
   day_start_hour: number;
   progress_units?: string[];
 }) {
+  if (!process.env.NOTION_SETTINGS_DB_ID) {
+    return { error: "no_settings_db" };
+  }
   try {
     const existing = await getAppSettings();
     if (existing) {
@@ -48,6 +51,7 @@ export async function saveSettings(data: {
     } else {
       await createAppSettings({ ...data, progress_units: data.progress_units ?? ["mins", "hrs"] });
     }
+    revalidateTag("app-settings", {});
     revalidatePath("/", "layout");
     revalidatePath("/settings");
     revalidatePath("/today");

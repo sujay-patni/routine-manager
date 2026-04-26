@@ -9,12 +9,13 @@ import EditHabitSheet from "@/components/EditHabitSheet";
 import EditEventSheet from "@/components/EditEventSheet";
 import HabitDetailSheet from "@/components/HabitDetailSheet";
 import EventDetailSheet from "@/components/EventDetailSheet";
-import TimetableView from "@/app/today/TimetableView";
 import DayLogSheet from "@/app/today/DayLogSheet";
-import type { ProcessedHabit } from "@/lib/habit-logic";
+import { skipHabit, unskipHabit } from "@/app/actions/habits";
+import { skipEvent, unskipEvent } from "@/app/actions/events";
+import { isHabitScheduledForDay, type ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
 import type { AppEvent } from "@/lib/notion/types";
-import { format, addDays, subDays, parseISO, eachDayOfInterval } from "date-fns";
+import { format, addDays, subDays, parseISO, eachDayOfInterval, isBefore, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -33,11 +34,11 @@ export type OptimisticAction<T> = { action: "add" | "update" | "delete"; item: T
 
 type TimeKey = "morning" | "afternoon" | "evening" | "night";
 
-const TIME_SECTIONS: { key: TimeKey; label: string; icon: string; range: string }[] = [
-  { key: "morning",   label: "Morning",   icon: "🌅", range: "4 AM – 12 PM" },
-  { key: "afternoon", label: "Afternoon", icon: "☀️",  range: "12 PM – 4 PM" },
-  { key: "evening",   label: "Evening",   icon: "🌆", range: "4 PM – 8 PM"  },
-  { key: "night",     label: "Night",     icon: "🌙", range: "8 PM – 4 AM"  },
+const TIME_SECTIONS: { key: TimeKey; label: string; icon: string; range: string; capacityMins: number }[] = [
+  { key: "morning",   label: "Morning",   icon: "🌅", range: "4 AM – 12 PM", capacityMins: 8 * 60 },
+  { key: "afternoon", label: "Afternoon", icon: "☀️",  range: "12 PM – 4 PM", capacityMins: 4 * 60 },
+  { key: "evening",   label: "Evening",   icon: "🌆", range: "4 PM – 8 PM", capacityMins: 4 * 60 },
+  { key: "night",     label: "Night",     icon: "🌙", range: "8 PM – 4 AM", capacityMins: 8 * 60 },
 ];
 
 const WEEK_SECTION_ORDER = ["morning", "afternoon", "evening", "night", "all_day"] as const;
@@ -144,6 +145,8 @@ export default function TodayClient({
   );
 
   const router = useRouter();
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [skippedExpanded, setSkippedExpanded] = useState(false);
   const [weekExpanded, setWeekExpanded] = useState(false);
 
   const [doneOverrides, setDoneOverrides] = useState<Map<string, boolean>>(new Map());
@@ -212,18 +215,98 @@ export default function TodayClient({
     });
   }
 
-  // — View mode —
-  const [viewMode, setViewMode] = useState<"card" | "timetable">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("today_view_mode") as "card" | "timetable") ?? "card";
-    }
-    return "card";
-  });
-  function toggleViewMode() {
-    setViewMode(prev => {
-      const next = prev === "card" ? "timetable" : "card";
-      localStorage.setItem("today_view_mode", next);
-      return next;
+  function handleHabitSkip(habit: ProcessedHabit) {
+    startHabitTransition(async () => {
+      const result = await skipHabit({
+        habitId: habit.id,
+        habitName: habit.name,
+        frequency: habit.frequency,
+        date: dateStr,
+        weekStart,
+        weekEnd,
+      });
+      if (result?.success && result.skip) {
+        dispatchHabit({
+          action: "update",
+          item: {
+            ...habit,
+            skip_id: result.skip.id,
+            is_skipped: true,
+            skip_scope: result.skip.scope,
+            state: "skipped",
+            show: false,
+          },
+        });
+        setSkippedExpanded(true);
+      } else if (result?.error) {
+        console.error("Error skipping habit:", result.error);
+      }
+    });
+  }
+
+  function handleHabitUnskip(habit: ProcessedHabit) {
+    if (!habit.skip_id) return;
+    startHabitTransition(async () => {
+      const result = await unskipHabit(habit.skip_id!);
+      if (result?.success) {
+        dispatchHabit({
+          action: "update",
+          item: {
+            ...habit,
+            skip_id: null,
+            is_skipped: false,
+            skip_scope: null,
+            state: "pending",
+            show: true,
+          },
+        });
+      } else if (result?.error) {
+        console.error("Error unskipping habit:", result.error);
+      }
+    });
+  }
+
+  function handleEventSkip(event: TodayEvent) {
+    startHabitTransition(async () => {
+      const result = await skipEvent({
+        eventId: event.id,
+        eventTitle: event.title,
+        date: dateStr,
+      });
+      if (result?.success && result.skip) {
+        dispatchEvent({
+          action: "update",
+          item: {
+            ...event,
+            skip_id: result.skip.id,
+            is_skipped: true,
+            skip_scope: result.skip.scope,
+          },
+        });
+        setSkippedExpanded(true);
+      } else if (result?.error) {
+        console.error("Error skipping event:", result.error);
+      }
+    });
+  }
+
+  function handleEventUnskip(event: TodayEvent) {
+    if (!event.skip_id) return;
+    startHabitTransition(async () => {
+      const result = await unskipEvent(event.skip_id!);
+      if (result?.success) {
+        dispatchEvent({
+          action: "update",
+          item: {
+            ...event,
+            skip_id: null,
+            is_skipped: false,
+            skip_scope: null,
+          },
+        });
+      } else if (result?.error) {
+        console.error("Error unskipping event:", result.error);
+      }
     });
   }
 
@@ -286,15 +369,16 @@ export default function TodayClient({
     }
   }, [isLateNight, router]);
 
-  const visibleEvents = optEvents;
-  const visibleHabits = optHabits.filter((h) => h.show && h.state !== "satisfied");
-  const satisfiedHabits = optHabits.filter((h) => h.state === "satisfied");
+  const skippedEvents = optEvents.filter((e) => e.is_skipped);
+  const visibleEvents = optEvents.filter((e) => !e.is_skipped);
+  const skippedHabits = optHabits.filter((h) => h.is_skipped);
+  const visibleHabits = optHabits.filter((h) => !h.is_skipped && h.show && h.state !== "satisfied");
+  const satisfiedHabits = optHabits.filter((h) => !h.is_skipped && h.state === "satisfied");
 
   const doneCount =
-    optHabits.filter((h) => doneOverrides.has(h.id) ? doneOverrides.get(h.id) : h.completed_today > 0).length +
+    optHabits.filter((h) => !h.is_skipped && (doneOverrides.has(h.id) ? doneOverrides.get(h.id) : h.completed_today > 0)).length +
     visibleEvents.filter((e) => doneOverrides.has(e.id) ? doneOverrides.get(e.id) : e.is_completed).length;
-  const totalCount = optHabits.length + visibleEvents.length;
-  const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  const totalCount = optHabits.filter((h) => !h.is_skipped).length + visibleEvents.length;
   const isToday = isLateNight || dateStr === format(new Date(), "yyyy-MM-dd");
 
   // ── Bucket items into time sections ──────────────────────────────────────
@@ -351,9 +435,9 @@ export default function TodayClient({
   }
 
   // ── Time summary ─────────────────────────────────────────────────────────
-  const plannedMins = optHabits.filter(h => h.show).reduce((s, h) => s + (h.duration_minutes ?? 0), 0)
-    + optEvents.reduce((s, e) => s + (e.duration_minutes ?? 0), 0);
-  const hasDuration = optHabits.some(h => h.duration_minutes != null) || optEvents.some(e => e.duration_minutes != null);
+  const plannedMins = optHabits.filter(h => h.show && !h.is_skipped).reduce((s, h) => s + (h.duration_minutes ?? 0), 0)
+    + visibleEvents.reduce((s, e) => s + (e.duration_minutes ?? 0), 0);
+  const hasDuration = optHabits.some(h => h.duration_minutes != null && !h.is_skipped) || visibleEvents.some(e => e.duration_minutes != null);
 
   function fmtMins(m: number) {
     if (m < 60) return `${m}m`;
@@ -420,22 +504,7 @@ export default function TodayClient({
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
-                <button
-                  onClick={toggleViewMode}
-                  className={cn("w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors", viewMode === "timetable" ? "text-primary bg-primary/10" : "text-muted-foreground")}
-                  aria-label={viewMode === "card" ? "Switch to timetable view" : "Switch to card view"}
-                >
-                  {viewMode === "card" ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10" x2="20" y2="10"/>
-                      <line x1="4" y1="14" x2="20" y2="14"/><line x1="4" y1="18" x2="20" y2="18"/>
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                  )}
-                </button>
+
               </div>
               <ProgressRing done={doneCount} total={totalCount} />
               {!isToday && (
@@ -469,31 +538,17 @@ export default function TodayClient({
         )}
 
         {/* Time summary banner */}
-        {hasDuration && plannedMins > 0 && (
-          <div className="flex items-center justify-between text-[11.5px] text-muted-foreground bg-muted/30 rounded-xl px-3 py-2">
-            <span>⏱ ~{fmtMins(plannedMins)} planned</span>
-            <button
-              onClick={() => setDayLogOpen(true)}
-              className="text-primary font-medium hover:underline"
-            >
-              Day Log →
-            </button>
-          </div>
-        )}
+        <div className="flex items-center justify-between text-[11.5px] text-muted-foreground bg-muted/30 rounded-xl px-3 py-2">
+          <span>{hasDuration && plannedMins > 0 ? `⏱ ~${fmtMins(plannedMins)} planned` : "⏱ 0 mins planned"}</span>
+          <button
+            onClick={() => setDayLogOpen(true)}
+            className="text-primary font-medium hover:underline"
+          >
+            Day Log →
+          </button>
+        </div>
 
-        {/* Timetable view */}
-        {viewMode === "timetable" && (
-          <TimetableView
-            habits={[...visibleHabits, ...satisfiedHabits]}
-            events={visibleEvents}
-            dateStr={dateStr}
-            doneOverrides={doneOverrides}
-            onViewHabit={setViewHabit}
-            onViewEvent={setViewEvent}
-          />
-        )}
-
-        {viewMode === "card" && (<>{(() => {
+        {(() => {
           // ── Section ordering ────────────────────────────────────────────────
           type Entry = {
             kind: "habit" | "event";
@@ -509,10 +564,16 @@ export default function TodayClient({
           const upcomingKeys = ALL_KEYS.slice(currentIdx);   // current + upcoming
           const pastKeys     = ALL_KEYS.slice(0, currentIdx); // past sections
 
-          // Build entries for a time section, optionally filtered to pending or done
-          function buildEntries(key: TimeKey, filter: "pending" | "completed"): Entry[] {
-            const sHabits = habitsBySection.get(key) ?? [];
-            const sEvents = eventsBySection.get(key) ?? [];
+          type EntryFilter = "pending" | "completed" | "skipped";
+
+          // Build entries for a time section, optionally filtered to pending, done, or skipped
+          function buildEntries(key: TimeKey, filter: EntryFilter): Entry[] {
+            const sHabits = filter === "skipped"
+              ? skippedHabits.filter((h) => habitSection(h) === key)
+              : habitsBySection.get(key) ?? [];
+            const sEvents = filter === "skipped"
+              ? skippedEvents.filter((e) => eventSection(e) === key)
+              : eventsBySection.get(key) ?? [];
             const all: Entry[] = [
               ...sHabits.map((h) => ({
                 kind: "habit" as const,
@@ -532,7 +593,11 @@ export default function TodayClient({
                 };
               }),
             ];
-            const filtered = all.filter((e) => filter === "pending" ? !e.done : e.done);
+            const filtered = all.filter((e) => {
+              if (filter === "pending") return !e.done;
+              if (filter === "completed") return e.done;
+              return true;
+            });
             filtered.sort((a, b) => {
               const groupA = (a.timed ? 1 : 0);
               const groupB = (b.timed ? 1 : 0);
@@ -542,13 +607,19 @@ export default function TodayClient({
             return filtered;
           }
 
-          function buildAllDayEntries(filter: "pending" | "completed"): Entry[] {
+          function buildAllDayEntries(filter: EntryFilter): Entry[] {
             const all: Entry[] = [
-              ...allDayHabits.map(h => ({ kind: "habit" as const, item: h, sortKey: h.sort_order ?? 9999, done: h.completed_today > 0, timed: false })),
-              ...allDayEvents.map(e => ({ kind: "event" as const, item: e, sortKey: 9999, done: e.is_completed, timed: false })),
+              ...(filter === "skipped" ? skippedHabits.filter((h) => habitSection(h) == null) : allDayHabits)
+                .map(h => ({ kind: "habit" as const, item: h, sortKey: h.sort_order ?? 9999, done: h.completed_today > 0, timed: false })),
+              ...(filter === "skipped" ? skippedEvents.filter((e) => eventSection(e) == null) : allDayEvents)
+                .map(e => ({ kind: "event" as const, item: e, sortKey: 9999, done: e.is_completed, timed: false })),
             ];
             return all
-              .filter((e) => filter === "pending" ? !e.done : e.done)
+              .filter((e) => {
+                if (filter === "pending") return !e.done;
+                if (filter === "completed") return e.done;
+                return true;
+              })
               .sort((a, b) => a.sortKey - b.sortKey);
           }
 
@@ -561,6 +632,8 @@ export default function TodayClient({
                   today={today}
                   onDoneChange={handleDoneChange}
                   onToggle={handleHabitToggle}
+                  onSkip={() => handleHabitSkip(entry.item as ProcessedHabit)}
+                  onUnskip={() => handleHabitUnskip(entry.item as ProcessedHabit)}
                   onEdit={() => setEditHabit(entry.item as ProcessedHabit)}
                   onView={() => setViewHabit(entry.item as ProcessedHabit)}
                 />
@@ -569,6 +642,8 @@ export default function TodayClient({
                   key={entry.item.id}
                   event={entry.item as TodayEvent}
                   onDoneChange={handleDoneChange}
+                  onSkip={() => handleEventSkip(entry.item as TodayEvent)}
+                  onUnskip={() => handleEventUnskip(entry.item as TodayEvent)}
                   onEdit={() => setEditEvent(entry.item as TodayEvent)}
                   onView={() => setViewEvent(entry.item as TodayEvent)}
                 />
@@ -576,11 +651,24 @@ export default function TodayClient({
             );
           }
 
-          function renderTimeSection(key: TimeKey, filter: "pending" | "completed") {
+          function sectionPlannedMins(key: TimeKey): number {
+            const sHabits = habitsBySection.get(key) ?? [];
+            const sEvents = eventsBySection.get(key) ?? [];
+            return sHabits.reduce((s, h) => s + (h.duration_minutes ?? 0), 0)
+              + sEvents.reduce((s, e) => s + (e.duration_minutes ?? 0), 0);
+          }
+
+          function allDayPlannedMins(): number {
+            return allDayHabits.reduce((s, h) => s + (h.duration_minutes ?? 0), 0)
+              + allDayEvents.reduce((s, e) => s + (e.duration_minutes ?? 0), 0);
+          }
+
+          function renderTimeSection(key: TimeKey, filter: EntryFilter) {
             const entries = buildEntries(key, filter);
             if (entries.length === 0) return null;
             const sec = TIME_SECTIONS.find((s) => s.key === key)!;
             const isCurrent = filter === "pending" && key === currentSectionKey;
+            const plannedMinsForSection = sectionPlannedMins(key);
             const headerClass = filter === "completed"
               ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 flex items-center gap-1.5"
               : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground flex items-center gap-1.5";
@@ -595,30 +683,76 @@ export default function TodayClient({
                     <span>{sec.icon}</span>
                     <span>{sec.label}</span>
                   </h2>
-                  <span className={rangeClass}>{sec.range}</span>
+                  <div className="flex items-center gap-1.5">
+                    {filter === "pending" && plannedMinsForSection > 0 && (
+                      <span className="text-[10.5px] text-muted-foreground font-medium">
+                        {fmtMins(plannedMinsForSection)} / {fmtMins(sec.capacityMins)}
+                      </span>
+                    )}
+                    {filter === "pending" && plannedMinsForSection > 0 && (
+                      <span className="text-muted-foreground/30 text-[10px]">·</span>
+                    )}
+                    <span className={rangeClass}>{sec.range}</span>
+                  </div>
                 </div>
                 <div className="space-y-2">{renderEntries(entries)}</div>
               </section>
             );
           }
 
-          function renderAllDaySection(filter: "pending" | "completed") {
+          function renderAllDaySection(filter: EntryFilter) {
             const entries = buildAllDayEntries(filter);
             if (entries.length === 0) return null;
             const headerClass = filter === "completed"
-              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 mb-2.5"
-              : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground mb-2.5";
+              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50"
+              : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground";
+            const plannedMinsForAllDay = allDayPlannedMins();
             return (
               <section key={`allday-${filter}`}>
-                <h2 className={headerClass}>🗓 All Day</h2>
+                <div className="flex items-center justify-between mb-2.5">
+                  <h2 className={headerClass}>🗓 All Day</h2>
+                  {filter === "pending" && plannedMinsForAllDay > 0 && (
+                    <span className="text-[10.5px] text-muted-foreground font-medium">
+                      {fmtMins(plannedMinsForAllDay)} planned
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-2">{renderEntries(entries)}</div>
+              </section>
+            );
+          }
+
+          function renderSatisfiedHabits() {
+            if (satisfiedHabits.length === 0) return null;
+            return (
+              <section>
+                <h2 className="text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 mb-2.5">Weekly goals met</h2>
+                <div className="space-y-2">
+                  {satisfiedHabits.map((h) => (
+                    <HabitCard
+                      key={h.id}
+                      habit={h}
+                      today={today}
+                      onDoneChange={handleDoneChange}
+                      onToggle={handleHabitToggle}
+                      onSkip={() => handleHabitSkip(h)}
+                      onUnskip={() => handleHabitUnskip(h)}
+                      onEdit={() => setEditHabit(h)}
+                      onView={() => setViewHabit(h)}
+                    />
+                  ))}
+                </div>
               </section>
             );
           }
 
           const hasAnyCompleted =
             ALL_KEYS.some((k) => buildEntries(k, "completed").length > 0) ||
-            buildAllDayEntries("completed").length > 0;
+            buildAllDayEntries("completed").length > 0 ||
+            satisfiedHabits.length > 0;
+          const hasAnySkipped =
+            ALL_KEYS.some((k) => buildEntries(k, "skipped").length > 0) ||
+            buildAllDayEntries("skipped").length > 0;
 
           return (
             <>
@@ -628,41 +762,47 @@ export default function TodayClient({
               {upcomingKeys.slice(1).map((key) => renderTimeSection(key, "pending"))}
               {pastKeys.map((key) => renderTimeSection(key, "pending"))}
 
-              {/* ── Completed divider ── */}
+              {/* ── Completed accordion ── */}
               {hasAnyCompleted && (
-                <div className="flex items-center gap-3 py-1">
-                  <div className="flex-1 h-px bg-border/60" />
-                  <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground/60">Completed</span>
-                  <div className="flex-1 h-px bg-border/60" />
-                </div>
+                <section className="border rounded-2xl bg-card card-elevated overflow-hidden">
+                  <button
+                    onClick={() => setCompletedExpanded((v) => !v)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground">Completed</span>
+                    <svg className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", completedExpanded && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  {completedExpanded && (
+                    <div className="px-4 pb-4 space-y-4">
+                      {ALL_KEYS.map((key) => renderTimeSection(key, "completed"))}
+                      {renderAllDaySection("completed")}
+                      {renderSatisfiedHabits()}
+                    </div>
+                  )}
+                </section>
               )}
 
-              {/* ── Completed group (fixed chronological order) ── */}
-              {ALL_KEYS.map((key) => renderTimeSection(key, "completed"))}
-              {renderAllDaySection("completed")}
+              {/* ── Skipped accordion ── */}
+              {hasAnySkipped && (
+                <section className="border rounded-2xl bg-card card-elevated overflow-hidden">
+                  <button
+                    onClick={() => setSkippedExpanded((v) => !v)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground">Skipped</span>
+                    <svg className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", skippedExpanded && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  {skippedExpanded && (
+                    <div className="px-4 pb-4 space-y-4">
+                      {ALL_KEYS.map((key) => renderTimeSection(key, "skipped"))}
+                      {renderAllDaySection("skipped")}
+                    </div>
+                  )}
+                </section>
+              )}
             </>
           );
         })()}
-
-        {/* Weekly goals met */}
-        {satisfiedHabits.length > 0 && (
-          <section>
-            <h2 className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground mb-2.5">Weekly goals met ✓</h2>
-            <div className="space-y-2">
-              {satisfiedHabits.map((h) => (
-                <HabitCard
-                  key={h.id}
-                  habit={h}
-                  today={today}
-                  onDoneChange={handleDoneChange}
-                  onToggle={handleHabitToggle}
-                  onEdit={() => setEditHabit(h)}
-                  onView={() => setViewHabit(h)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* Empty state */}
         {totalCount === 0 && (
@@ -672,7 +812,6 @@ export default function TodayClient({
             <p className="text-sm text-muted-foreground">Add habits, tasks, and events to get started.</p>
           </div>
         )}
-        </>)}
 
         {/* This Week — collapsible habit grid */}
         {activeHabits.length > 0 && weekDays.length === 7 && (
@@ -711,6 +850,8 @@ export default function TodayClient({
                         const done = Number(habit.completions_this_week);
                         const pct = Math.min(100, Math.round((done / target) * 100));
                         const completedSet = new Set(habit.completions_by_date ?? []);
+                        const skippedSet = new Set(habit.skipped_dates ?? []);
+                        const showDayStatus = habit.frequency !== "weekly";
                         return (
                           <div key={habit.id} className="space-y-1 min-w-[420px]">
                             <div className="grid gap-1 items-center" style={{ gridTemplateColumns: "minmax(100px,1fr) repeat(7, 1.75rem)" }}>
@@ -720,14 +861,33 @@ export default function TodayClient({
                               {weekDays.map((d) => {
                                 const dayStr = format(d, "yyyy-MM-dd");
                                 const completed = completedSet.has(dayStr);
+                                const skipped = showDayStatus && skippedSet.has(dayStr);
+                                const scheduled = showDayStatus && isHabitScheduledForDay(habit, d);
+                                const missed = showDayStatus && scheduled && !completed && !skipped && isBefore(startOfDay(d), startOfDay(parsedDate));
                                 return (
                                   <div
                                     key={dayStr}
-                                    className={cn("w-7 h-7 rounded-full flex items-center justify-center mx-auto", completed ? "bg-primary text-primary-foreground" : "bg-muted")}
+                                    className={cn(
+                                      "w-7 h-7 rounded-full flex items-center justify-center mx-auto",
+                                      completed && "bg-primary text-primary-foreground",
+                                      skipped && "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
+                                      missed && "bg-muted text-muted-foreground",
+                                      !completed && !skipped && !missed && "bg-muted"
+                                    )}
                                   >
                                     {completed && (
                                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                    {skipped && (
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 4l10 8-10 8V4zM19 5v14" />
+                                      </svg>
+                                    )}
+                                    {missed && (
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                       </svg>
                                     )}
                                   </div>

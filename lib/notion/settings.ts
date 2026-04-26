@@ -28,6 +28,16 @@ function pageToSettings(page: any): AppSettings {
   };
 }
 
+export async function ensureProgressUnitsColumn(): Promise<void> {
+  if (!SETTINGS_DB) return;
+  try {
+    await (notion.dataSources as any).update({
+      data_source_id: SETTINGS_DB,
+      properties: { "Progress Units": { rich_text: {} } },
+    });
+  } catch { /* column already exists or insufficient permission */ }
+}
+
 export async function getAppSettings(): Promise<AppSettings | null> {
   if (!SETTINGS_DB) return null;
   try {
@@ -74,5 +84,15 @@ export async function updateAppSettings(
     const customUnits = data.progress_units.filter(u => !DEFAULT_PROGRESS_UNITS.includes(u)).join(",");
     props["Progress Units"] = { rich_text: [{ text: { content: customUnits } }] };
   }
-  await notion.pages.update({ page_id: id, properties: props });
+  try {
+    await notion.pages.update({ page_id: id, properties: props });
+  } catch (e: any) {
+    // If Progress Units column doesn't exist yet, create it then retry
+    if (props["Progress Units"] && String(e).toLowerCase().includes("progress units")) {
+      await ensureProgressUnitsColumn();
+      await notion.pages.update({ page_id: id, properties: props });
+    } else {
+      throw e;
+    }
+  }
 }

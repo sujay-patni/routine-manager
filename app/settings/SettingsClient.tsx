@@ -67,9 +67,10 @@ interface Props {
   habits: Habit[];
   notionHabitsUrl?: string;
   notionEventsUrl?: string;
+  notionSettingsConfigured?: boolean;
 }
 
-export default function SettingsClient({ habits: initialHabits, notionHabitsUrl, notionEventsUrl }: Props) {
+export default function SettingsClient({ habits: initialHabits, notionHabitsUrl, notionEventsUrl, notionSettingsConfigured }: Props) {
   const settings = useSettings();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -104,11 +105,11 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
   const { theme, setTheme } = useTheme();
 
   // Progress units state
-  const [progressUnits, setProgressUnits] = useState(settings.progress_units);
+  const [progressUnits, setProgressUnits] = useState(settings.progress_units ?? ["mins", "hrs"]);
   const [newUnit, setNewUnit] = useState("");
   const FIXED_UNITS = ["mins", "hrs"];
 
-  const notionEnabled = settings.id !== "env";
+  const notionEnabled = notionSettingsConfigured === true || settings.id !== "env";
 
   async function handleSaveSettings(e: React.FormEvent) {
     e.preventDefault();
@@ -143,16 +144,26 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
     const updated = [...progressUnits, unit];
     setProgressUnits(updated);
     setNewUnit("");
-    await saveSettings({ ...currentBaseSettings(), progress_units: updated });
-    router.refresh();
+    const result = await saveSettings({ ...currentBaseSettings(), progress_units: updated });
+    if (result.error) {
+      console.error("Failed to save progress unit:", result.error);
+      setProgressUnits(progressUnits); // revert
+    } else {
+      router.refresh();
+    }
   }
 
   async function removeProgressUnit(unit: string) {
     if (FIXED_UNITS.includes(unit)) return;
     const updated = progressUnits.filter(u => u !== unit);
     setProgressUnits(updated);
-    await saveSettings({ ...currentBaseSettings(), progress_units: updated });
-    router.refresh();
+    const result = await saveSettings({ ...currentBaseSettings(), progress_units: updated });
+    if (result.error) {
+      console.error("Failed to remove progress unit:", result.error);
+      setProgressUnits(progressUnits); // revert
+    } else {
+      router.refresh();
+    }
   }
 
   async function toggleHabitActive(habit: Habit) {
@@ -353,6 +364,11 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
             Units used when tracking habit progress. <strong>mins</strong> and <strong>hrs</strong> are built-in time units — the progress value IS the time. Custom units can have a conversion rate set per-habit.
           </p>
           <div className="rounded-2xl border bg-card card-elevated p-4 space-y-4">
+            {!notionEnabled && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Custom units require <code className="bg-muted px-1 rounded">NOTION_SETTINGS_DB_ID</code> to persist across reloads.
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {progressUnits.map(unit => (
                 <span
@@ -360,7 +376,7 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border bg-muted"
                 >
                   {unit}
-                  {!FIXED_UNITS.includes(unit) && (
+                  {notionEnabled && !FIXED_UNITS.includes(unit) && (
                     <button
                       type="button"
                       onClick={() => removeProgressUnit(unit)}
@@ -375,18 +391,20 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
                 </span>
               ))}
             </div>
-            <form
-              onSubmit={(e) => { e.preventDefault(); addProgressUnit(); }}
-              className="flex gap-2"
-            >
-              <Input
-                value={newUnit}
-                onChange={e => setNewUnit(e.target.value)}
-                placeholder="e.g. pages, reps, km"
-                className="flex-1"
-              />
-              <Button type="submit" variant="outline" size="sm">Add</Button>
-            </form>
+            {notionEnabled && (
+              <form
+                onSubmit={(e) => { e.preventDefault(); addProgressUnit(); }}
+                className="flex gap-2"
+              >
+                <Input
+                  value={newUnit}
+                  onChange={e => setNewUnit(e.target.value)}
+                  placeholder="e.g. pages, reps, km"
+                  className="flex-1"
+                />
+                <Button type="submit" variant="outline" size="sm">Add</Button>
+              </form>
+            )}
           </div>
         </section>
 
