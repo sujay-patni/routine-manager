@@ -68,9 +68,10 @@ interface Props {
   groups?: Group[];
   notionHabitsUrl?: string;
   notionEventsUrl?: string;
+  notionSettingsConfigured?: boolean;
 }
 
-export default function SettingsClient({ habits: initialHabits, groups = [], notionHabitsUrl, notionEventsUrl }: Props) {
+export default function SettingsClient({ habits: initialHabits, groups = [], notionHabitsUrl, notionEventsUrl, notionSettingsConfigured }: Props) {
   const settings = useSettings();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -104,7 +105,12 @@ export default function SettingsClient({ habits: initialHabits, groups = [], not
   const [settingsSaved, setSettingsSaved] = useState(false);
   const { theme, setTheme } = useTheme();
 
-  const notionEnabled = settings.id !== "env";
+  // Progress units state
+  const [progressUnits, setProgressUnits] = useState(settings.progress_units ?? ["mins", "hrs"]);
+  const [newUnit, setNewUnit] = useState("");
+  const FIXED_UNITS = ["mins", "hrs"];
+
+  const notionEnabled = notionSettingsConfigured === true || settings.id !== "env";
 
   async function handleSaveSettings(e: React.FormEvent) {
     e.preventDefault();
@@ -114,11 +120,49 @@ export default function SettingsClient({ habits: initialHabits, groups = [], not
       week_start_day: Number(weekStart),
       deadline_surface_days: Number(surfaceDays),
       day_start_hour: Number(dayStartHour),
+      progress_units: progressUnits,
     });
     setSavingSettings(false);
     if (!result.error) {
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 2500);
+      router.refresh();
+    }
+  }
+
+  function currentBaseSettings() {
+    return {
+      timezone,
+      week_start_day: Number(weekStart),
+      deadline_surface_days: Number(surfaceDays),
+      day_start_hour: Number(dayStartHour),
+    };
+  }
+
+  async function addProgressUnit() {
+    const unit = newUnit.trim().toLowerCase();
+    if (!unit || progressUnits.includes(unit)) { setNewUnit(""); return; }
+    const updated = [...progressUnits, unit];
+    setProgressUnits(updated);
+    setNewUnit("");
+    const result = await saveSettings({ ...currentBaseSettings(), progress_units: updated });
+    if (result.error) {
+      console.error("Failed to save progress unit:", result.error);
+      setProgressUnits(progressUnits); // revert
+    } else {
+      router.refresh();
+    }
+  }
+
+  async function removeProgressUnit(unit: string) {
+    if (FIXED_UNITS.includes(unit)) return;
+    const updated = progressUnits.filter(u => u !== unit);
+    setProgressUnits(updated);
+    const result = await saveSettings({ ...currentBaseSettings(), progress_units: updated });
+    if (result.error) {
+      console.error("Failed to remove progress unit:", result.error);
+      setProgressUnits(progressUnits); // revert
+    } else {
       router.refresh();
     }
   }
@@ -310,6 +354,59 @@ export default function SettingsClient({ habits: initialHabits, groups = [], not
               {savingSettings ? "Saving…" : settingsSaved ? "Saved ✓" : "Save preferences"}
             </Button>
           </form>
+        </section>
+
+        <Separator />
+
+        {/* ─── Progress Units ─── */}
+        <section className="space-y-4">
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Progress Units</h2>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            Units used when tracking habit progress. <strong>mins</strong> and <strong>hrs</strong> are built-in time units — the progress value IS the time. Custom units can have a conversion rate set per-habit.
+          </p>
+          <div className="rounded-2xl border bg-card card-elevated p-4 space-y-4">
+            {!notionEnabled && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Custom units require <code className="bg-muted px-1 rounded">NOTION_SETTINGS_DB_ID</code> to persist across reloads.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {progressUnits.map(unit => (
+                <span
+                  key={unit}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border bg-muted"
+                >
+                  {unit}
+                  {notionEnabled && !FIXED_UNITS.includes(unit) && (
+                    <button
+                      type="button"
+                      onClick={() => removeProgressUnit(unit)}
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                      aria-label={`Remove ${unit}`}
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+            {notionEnabled && (
+              <form
+                onSubmit={(e) => { e.preventDefault(); addProgressUnit(); }}
+                className="flex gap-2"
+              >
+                <Input
+                  value={newUnit}
+                  onChange={e => setNewUnit(e.target.value)}
+                  placeholder="e.g. pages, reps, km"
+                  className="flex-1"
+                />
+                <Button type="submit" variant="outline" size="sm">Add</Button>
+              </form>
+            )}
+          </div>
         </section>
 
         <Separator />

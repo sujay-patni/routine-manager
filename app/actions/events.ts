@@ -11,7 +11,8 @@ import {
   deleteEvent as notionDeleteEvent,
   updateEvent as notionUpdateEvent,
 } from "@/lib/notion/events";
-import { getWeekBoundaries, formatDateForDB, getDeadlineState, parseZonedOrLocal } from "@/lib/habit-logic";
+import { createSkip, deleteSkip, getSkipsForWindow } from "@/lib/notion/skips";
+import { getWeekBoundaries, getWeekBoundariesForDate, formatDateForDB, getDeadlineState, parseZonedOrLocal } from "@/lib/habit-logic";
 import { getSettings } from "@/app/actions/settings";
 import { toZonedTime } from "date-fns-tz";
 import type { AppEvent } from "@/lib/notion/types";
@@ -28,6 +29,10 @@ export interface TodayEvent extends AppEvent {
 }
 
 import { rrulestr } from "rrule";
+
+function baseEventId(id: string): string {
+  return id.split("_")[0];
+}
 
 function getRecurrenceInstance(event: AppEvent, targetDate: Date, timezone: string, todayStr: string): Date | null {
   if (!event.is_recurring || !event.recurrence_rule) return null;
@@ -63,6 +68,10 @@ export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
     targetDate = today;
   }
   const todayStr = formatDateForDB(targetDate);
+  const { weekStart, weekEnd } = getWeekBoundariesForDate(targetDate, timezone, settings.week_start_day);
+  const weekStartStr = formatDateForDB(weekStart);
+  const weekEndStr = formatDateForDB(weekEnd);
+  const skips = await getSkipsForWindow(todayStr, weekStartStr, weekEndStr);
 
   let allEvents: AppEvent[];
   try {
@@ -117,7 +126,20 @@ export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
     }
   }
 
-  return todayEvents;
+  return todayEvents.map((event) => {
+    const skip = skips.find((s) =>
+      s.item_type === "event" &&
+      s.scope === "day" &&
+      s.date === todayStr &&
+      s.item_id === baseEventId(event.id)
+    );
+    return {
+      ...event,
+      skip_id: skip?.id ?? null,
+      is_skipped: !!skip,
+      skip_scope: skip?.scope ?? null,
+    };
+  });
 }
 
 export async function getUpcomingEvents(): Promise<AppEvent[]> {
@@ -201,6 +223,7 @@ export async function createEvent(data: {
   surface_days?: number;
   time_of_day?: string;
   due_time?: string;
+  duration_minutes?: number;
   group_id?: string | null;
 }) {
   try {
@@ -226,12 +249,47 @@ export async function completeEvent(id: string) {
   return { success: true };
 }
 
-export async function setEventCompleted(id: string, isCompleted: boolean) {
+export async function setEventCompleted(id: string, isCompleted: boolean, durationActual?: number) {
   try {
-    await notionSetEventCompleted(id, isCompleted);
+    const baseId = baseEventId(id);
+    await notionSetEventCompleted(baseId, isCompleted, durationActual);
     revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
+    revalidatePath("/calendar");
+    return { success: true };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+export async function skipEvent(data: {
+  eventId: string;
+  eventTitle: string;
+  date: string;
+}) {
+  try {
+    const skip = await createSkip({
+      item_type: "event",
+      item_id: baseEventId(data.eventId),
+      item_title: data.eventTitle,
+      scope: "day",
+      date: data.date,
+    });
+    revalidateTag("skips", {});
+    revalidatePath("/today");
+    revalidatePath("/calendar");
+    return { success: true, skip };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+export async function unskipEvent(skipId: string) {
+  try {
+    await deleteSkip(skipId);
+    revalidateTag("skips", {});
+    revalidatePath("/today");
     revalidatePath("/calendar");
     return { success: true };
   } catch (e) {
@@ -266,6 +324,7 @@ export async function updateEvent(
     surface_days: number;
     time_of_day: string | null;
     due_time: string | null;
+    duration_minutes: number | null;
     group_id: string | null;
   }>
 ) {

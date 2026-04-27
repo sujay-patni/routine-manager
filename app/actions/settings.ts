@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath, unstable_cache } from "next/cache";
+import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import {
   getAppSettings,
   createAppSettings,
@@ -17,18 +17,17 @@ function getEnvSettings(): AppSettings {
     week_start_day: Number(process.env.WEEK_START_DAY ?? 1),
     deadline_surface_days: Number(process.env.DEADLINE_SURFACE_DAYS ?? 3),
     day_start_hour: Number(process.env.DAY_START_HOUR ?? 0),
+    progress_units: ["mins", "hrs"],
   };
 }
 
-// Cached for 5 minutes to avoid a Notion API call on every page render.
-// Invalidated immediately when saveSettings() writes a new value.
 const getCachedSettings = unstable_cache(
   async (): Promise<AppSettings> => {
     const notionSettings = await getAppSettings();
     return notionSettings ?? getEnvSettings();
   },
   ["app-settings"],
-  { revalidate: 300 }
+  { revalidate: 300, tags: ["app-settings"] }
 );
 
 export async function getSettings(): Promise<AppSettings> {
@@ -40,15 +39,19 @@ export async function saveSettings(data: {
   week_start_day: number;
   deadline_surface_days: number;
   day_start_hour: number;
+  progress_units?: string[];
 }) {
+  if (!process.env.NOTION_SETTINGS_DB_ID) {
+    return { error: "no_settings_db" };
+  }
   try {
     const existing = await getAppSettings();
     if (existing) {
       await updateAppSettings(existing.id, data);
     } else {
-      await createAppSettings(data);
+      await createAppSettings({ ...data, progress_units: data.progress_units ?? ["mins", "hrs"] });
     }
-    // Bust the settings cache so the new values take effect immediately
+    revalidateTag("app-settings", {});
     revalidatePath("/", "layout");
     revalidatePath("/settings");
     revalidatePath("/today");

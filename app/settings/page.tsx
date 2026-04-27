@@ -18,6 +18,7 @@ export default async function SettingsPage() {
       groups={groups}
       notionHabitsUrl={notionDbUrl(process.env.NOTION_HABITS_DB_ID)}
       notionEventsUrl={notionDbUrl(process.env.NOTION_EVENTS_DB_ID)}
+      notionSettingsConfigured={!!process.env.NOTION_SETTINGS_DB_ID}
     />
   );
 }

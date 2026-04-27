@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events";
 import type { AppEvent, Group } from "@/lib/notion/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface EditEventSheetProps {
   event: AppEvent | null;
@@ -56,19 +57,12 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   const [isPending, startTransition] = useTransition();
   const [deleteMode, setDeleteMode] = useState<"none" | "confirm_single" | "prompt_recurring">("none");
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   // Shared fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [duration, setDuration] = useState(event?.duration_minutes != null ? String(event.duration_minutes) : "");
 
   // Timed-specific
   const [eventDate, setEventDate] = useState("");
@@ -92,6 +86,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     if (!e) return;
     setTitle(e.title);
     setDescription(e.description ?? "");
+    setDuration(e.duration_minutes != null ? String(e.duration_minutes) : "");
     setGroupId(e.group_id ?? "");
     setError(null);
     setDeleteMode("none");
@@ -125,6 +120,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     const data: Parameters<typeof updateEvent>[1] = {
       title,
       description: description || undefined,
+      duration_minutes: duration ? Number(duration) : null,
       group_id: groupId || null,
     };
 
@@ -299,6 +295,18 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
               </div>
             </>
           )}
+
+          {/* Duration */}
+          <div className="space-y-2">
+            <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              type="number"
+              min={1}
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder="e.g. 60"
+            />
+          </div>
 
           {groups.length > 0 && (
             <div className="space-y-2">
