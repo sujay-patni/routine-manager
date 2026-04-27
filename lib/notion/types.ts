@@ -34,6 +34,7 @@ export interface Habit {
   duration_minutes: number | null; // default expected time per completion (minutes)
   // display
   sort_order: number | null;
+  group_id: string | null;
   skip_id?: string | null;
   is_skipped?: boolean;
   skip_scope?: SkipScope | null;
@@ -63,6 +64,7 @@ export interface AppEvent {
   // scheduling
   time_of_day: TimeOfDay | null;
   due_time: string | null;       // "HH:MM" for tasks/deadlines
+  group_id: string | null;
   // duration
   duration_minutes: number | null; // default expected time (minutes)
   duration_actual: number | null;  // actual time logged at completion (minutes)
@@ -79,6 +81,13 @@ export interface SkipRecord {
   date: string | null;
   week_start: string | null;
   week_end: string | null;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number | null;
 }
 
 export interface AppSettings {

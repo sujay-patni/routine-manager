@@ -12,7 +12,7 @@ import { saveSettings } from "@/app/actions/settings";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditHabitSheet from "@/components/EditHabitSheet";
 import { useSettings } from "@/components/SettingsProvider";
-import type { Habit } from "@/lib/notion/types";
+import type { Habit, Group } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
 
@@ -65,12 +65,13 @@ function getHabitSection(habit: Habit): SectionKey {
 
 interface Props {
   habits: Habit[];
+  groups?: Group[];
   notionHabitsUrl?: string;
   notionEventsUrl?: string;
   notionSettingsConfigured?: boolean;
 }
 
-export default function SettingsClient({ habits: initialHabits, notionHabitsUrl, notionEventsUrl, notionSettingsConfigured }: Props) {
+export default function SettingsClient({ habits: initialHabits, groups = [], notionHabitsUrl, notionEventsUrl, notionSettingsConfigured }: Props) {
   const settings = useSettings();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -410,6 +411,23 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
 
         <Separator />
 
+        {/* ─── Groups ─── */}
+        <section className="space-y-4">
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Groups</h2>
+          <div
+            className="rounded-2xl border bg-card card-elevated p-4 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition-colors"
+            onClick={() => router.push("/settings/groups")}
+          >
+            <div>
+              <p className="font-semibold text-sm">Manage Groups</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Organize habits and events by category</p>
+            </div>
+            <span className="text-sm text-primary font-medium">→</span>
+          </div>
+        </section>
+
+        <Separator />
+
         {/* ─── Habits ─── */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
@@ -467,7 +485,10 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
 
                       {/* Habit info */}
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{habit.name}</p>
+                        <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+                          {(() => { const gc = groups.find(g => g.id === habit.group_id)?.color; return gc ? <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: gc }} /> : null; })()}
+                          {habit.name}
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {habit.frequency === "daily"
                             ? "Daily"
@@ -561,12 +582,14 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
           if (!o) handleHabitAdded();
         }}
         defaultTab="habit"
+        groups={groups}
       />
       <EditHabitSheet
         habit={editingHabit}
         open={!!editingHabit}
         onOpenChange={(o) => { if (!o) setEditingHabit(null); }}
         onSaved={handleHabitUpdated}
+        groups={groups}
       />
     </div>
   );

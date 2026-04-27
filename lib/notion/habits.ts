@@ -27,6 +27,7 @@ function pageToHabit(page: any): Habit {
     progress_conversion_base: props["Progress Conversion Base"]?.number ?? null,
     duration_minutes: props["Duration"]?.number ?? null,
     sort_order: props["Sort Order"]?.number ?? null,
+    group_id: getRelationIds(props["Group"])[0] ?? null,
   };
 }
 
@@ -288,6 +289,7 @@ export async function createHabit(data: {
   progress_conversion_base?: number;
   duration_minutes?: number;
   sort_order?: number;
+  group_id?: string | null;
 }): Promise<Habit> {
   const props: any = {
     Name: { title: [{ text: { content: data.name } }] },
@@ -310,6 +312,7 @@ export async function createHabit(data: {
   if (data.progress_conversion_base != null) props["Progress Conversion Base"] = { number: data.progress_conversion_base };
   if (data.duration_minutes != null) props["Duration"] = { number: data.duration_minutes };
   if (data.sort_order != null) props["Sort Order"] = { number: data.sort_order };
+  if (data.group_id) props["Group"] = { relation: [{ id: data.group_id }] };
 
   const page = await notion.pages.create({
     parent: { data_source_id: HABITS_DB },
@@ -344,6 +347,7 @@ export async function updateHabit(
     progress_conversion_base: number | null;
     duration_minutes: number | null;
     sort_order: number | null;
+    group_id: string | null;
   }>
 ): Promise<void> {
   const props: Record<string, any> = {};
@@ -365,6 +369,7 @@ export async function updateHabit(
   if (data.progress_conversion_base !== undefined) props["Progress Conversion Base"] = { number: data.progress_conversion_base };
   if (data.duration_minutes !== undefined) props["Duration"] = { number: data.duration_minutes };
   if (data.sort_order !== undefined) props["Sort Order"] = { number: data.sort_order };
+  if (data.group_id !== undefined) props["Group"] = data.group_id ? { relation: [{ id: data.group_id }] } : { relation: [] };
 
   await notion.pages.update({ page_id: id, properties: props });
 }

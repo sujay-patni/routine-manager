@@ -6,9 +6,11 @@ import type { TodayEvent } from "@/app/actions/events";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useSwipeReveal } from "@/lib/useSwipeReveal";
+import type { Group } from "@/lib/notion/types";
 
 interface EventCardProps {
   event: TodayEvent;
+  groups?: Group[];
   onDoneChange?: (id: string, done: boolean) => void;
   onSkip?: () => void;
   onUnskip?: () => void;
@@ -50,7 +52,7 @@ function computeDefaultDuration(event: TodayEvent): number | null {
   return null;
 }
 
-export default function EventCard({ event, onDoneChange, onSkip, onUnskip, onEdit, onView }: EventCardProps) {
+export default function EventCard({ event, groups, onDoneChange, onSkip, onUnskip, onEdit, onView }: EventCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(event.is_completed);
   const isSkipped = event.is_skipped === true;
@@ -141,6 +143,7 @@ export default function EventCard({ event, onDoneChange, onSkip, onUnskip, onEdi
     ? event.isOverdue ? "🔴" : "⏰"
     : isAllDay ? "📋"
     : "📅";
+  const groupColor = groups?.find((g) => g.id === event.group_id)?.color ?? null;
 
   return (
     <div className="group relative overflow-hidden rounded-2xl">
@@ -174,7 +177,10 @@ export default function EventCard({ event, onDoneChange, onSkip, onUnskip, onEdi
           isPending && "opacity-70",
           onView && !logTimeOpen && "cursor-pointer"
         )}
-        style={swipeEnabled ? { transform: `translateX(-${translateX}px)` } : undefined}
+        style={{
+          ...(swipeEnabled ? { transform: `translateX(-${translateX}px)` } : {}),
+          ...(groupColor ? { borderLeftWidth: "3px", borderLeftColor: groupColor } : {}),
+        }}
       >
         <div className="flex items-start gap-3">
           {/* Complete button */}

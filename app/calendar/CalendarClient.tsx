@@ -13,14 +13,16 @@ import { parseZonedOrLocal } from "@/lib/habit-logic";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditEventSheet from "@/components/EditEventSheet";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/components/SettingsProvider";
+import GroupFilterBar from "@/components/GroupFilterBar";
 
 type CalendarView = "day" | "week" | "month" | "year" | "schedule";
 
 interface Props {
   events: AppEvent[];
+  groups: Group[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,8 +89,9 @@ function eventIcon(event: AppEvent): string {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function CalendarClient({ events }: Props) {
+export default function CalendarClient({ events, groups }: Props) {
   const { timezone, week_start_day: weekStartDay } = useSettings();
+  const [groupFilters, setGroupFilters] = useState<string[]>([]);
   const [view, setView] = useState<CalendarView>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
@@ -128,10 +131,16 @@ export default function CalendarClient({ events }: Props) {
     else if (view === "year") setCurrentDate((c) => addYears(c, d));
   }
 
-  // Index events by date
+  // Index events by date (respects group filter)
   const eventsByDate = useMemo(() => {
+    const filtered = (() => {
+      if (groupFilters.length === 0) return events;
+      return events.filter((e) =>
+        e.group_id ? groupFilters.includes(e.group_id) : groupFilters.includes("unassigned")
+      );
+    })();
     const map = new Map<string, AppEvent[]>();
-    for (const event of events) {
+    for (const event of filtered) {
       const dateStr = getEventDate(event, timezone);
       if (!dateStr) continue;
       const list = map.get(dateStr) ?? [];
@@ -139,7 +148,7 @@ export default function CalendarClient({ events }: Props) {
       map.set(dateStr, list);
     }
     return map;
-  }, [events, timezone]);
+  }, [events, timezone, groupFilters]);
 
   function openAdd(tab: "habit" | "timed" | "all_day" | "deadline", dateStr?: string) {
     setAddTab(tab);
@@ -181,7 +190,7 @@ export default function CalendarClient({ events }: Props) {
           top: `${top}px`,
           height: `${height}px`,
           width: colWidth,
-          backgroundColor: eventTypeColorHex(event.event_type),
+          backgroundColor: groups.find((g) => g.id === event.group_id)?.color ?? eventTypeColorHex(event.event_type),
           minHeight: "24px",
         }}
       >
@@ -414,8 +423,11 @@ export default function CalendarClient({ events }: Props) {
                       tabIndex={0}
                       onClick={(ev) => { ev.stopPropagation(); setEditingEvent(e); }}
                       onKeyDown={(ev) => ev.key === "Enter" && (ev.stopPropagation(), setEditingEvent(e))}
-                      className={cn("text-[10px] px-1 py-0.5 rounded text-white text-left truncate w-full cursor-pointer", eventTypeColor(e.event_type))}
+                      className={cn("text-[10px] px-1 py-0.5 rounded text-white text-left truncate w-full cursor-pointer flex items-center gap-1", eventTypeColor(e.event_type))}
                     >
+                      {groups.find((g) => g.id === e.group_id) && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white/70 flex-shrink-0" />
+                      )}
                       {e.title}
                     </div>
                   ))}
@@ -535,7 +547,10 @@ export default function CalendarClient({ events }: Props) {
                       </p>
                       <p className="text-xs text-muted-foreground">{formatEventTime(e, timezone)}</p>
                     </div>
-                    <span className={cn("w-2 h-2 rounded-full flex-shrink-0", eventTypeColor(e.event_type))} />
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: groups.find((g) => g.id === e.group_id)?.color ?? eventTypeColorHex(e.event_type) }}
+                    />
                   </button>
                 ))}
               </div>
@@ -655,6 +670,12 @@ export default function CalendarClient({ events }: Props) {
         </div>
       </header>
 
+      {groups.length > 0 && (
+        <div className="px-4 py-2 border-b max-w-4xl mx-auto w-full">
+          <GroupFilterBar groups={groups} activeFilters={groupFilters} onFilterChange={setGroupFilters} />
+        </div>
+      )}
+
       {/* View content */}
       <main className={cn(
         "flex-1 max-w-4xl mx-auto w-full",
@@ -731,12 +752,14 @@ export default function CalendarClient({ events }: Props) {
         event={editingEvent}
         open={!!editingEvent}
         onOpenChange={(o) => { if (!o) setEditingEvent(null); }}
+        groups={groups}
       />
       <AddItemSheet
         open={addOpen}
         onOpenChange={setAddOpen}
         defaultTab={addTab}
         defaultDate={addDefaultDate}
+        groups={groups}
       />
     </div>
   );

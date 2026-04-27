@@ -337,6 +337,7 @@ export async function createHabit(data: {
   progress_conversion?: number;
   progress_conversion_base?: number;
   duration_minutes?: number;
+  group_id?: string | null;
 }) {
   const hasProgress = data.progress_metric || data.progress_target != null;
   try {
@@ -422,6 +423,7 @@ export async function updateHabit(
     progress_conversion_base: number | null;
     duration_minutes: number | null;
     sort_order: number | null;
+    group_id: string | null;
   }>
 ) {
   const hasNewFields =

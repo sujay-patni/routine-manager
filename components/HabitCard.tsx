@@ -7,10 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useSwipeReveal } from "@/lib/useSwipeReveal";
+import type { Group } from "@/lib/notion/types";
 
 interface HabitCardProps {
   habit: ProcessedHabit;
   today: string;
+  groups?: Group[];
   onDoneChange?: (id: string, done: boolean) => void;
   onToggle?: (id: string, done: boolean, serverFn: () => Promise<void>) => void;
   onSkip?: () => void;
@@ -49,7 +51,7 @@ function progressToMinutes(value: number, unit: string | null | undefined, conve
   return Math.round(value * (conversion ?? 1));
 }
 
-export default function HabitCard({ habit, today, onDoneChange, onToggle, onSkip, onUnskip, onEdit, onView }: HabitCardProps) {
+export default function HabitCard({ habit, today, groups, onDoneChange, onToggle, onSkip, onUnskip, onEdit, onView }: HabitCardProps) {
   const [isPending, startTransition] = useTransition();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
   const [localProgress, setLocalProgress] = useState(habit.today_progress ?? 0);
@@ -168,6 +170,7 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onSkip
   }
 
   const config = stateConfig[habit.state];
+  const groupColor = groups?.find((g) => g.id === habit.group_id)?.color ?? null;
   const isProgressDone = hasProgress && localProgress >= (habit.progress_target ?? 0);
   const effectiveDone = hasProgress ? isProgressDone : localDone;
   const isSkipped = habit.is_skipped === true;
@@ -227,7 +230,10 @@ export default function HabitCard({ habit, today, onDoneChange, onToggle, onSkip
           isPending && "opacity-70",
           onView && !logTimeOpen && "cursor-pointer"
         )}
-        style={swipeEnabled ? { transform: `translateX(-${translateX}px)` } : undefined}
+        style={{
+          ...(swipeEnabled ? { transform: `translateX(-${translateX}px)` } : {}),
+          ...(groupColor ? { borderLeftWidth: "3px", borderLeftColor: groupColor } : {}),
+        }}
       >
         <div className="flex items-center gap-3">
           {/* Circle checkbox (non-progress only) */}

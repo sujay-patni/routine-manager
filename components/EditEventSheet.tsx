@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/notion/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { useIsMobile } from "@/lib/useMediaQuery";
 
@@ -19,6 +19,7 @@ interface EditEventSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dispatchEvent?: (action: OptimisticAction<TodayEvent>) => void;
+  groups?: Group[];
 }
 
 const SURFACE_OPTIONS = [
@@ -51,7 +52,7 @@ function isoTimePart(isoStr: string | null | undefined): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-export default function EditEventSheet({ event, open, onOpenChange, dispatchEvent }: EditEventSheetProps) {
+export default function EditEventSheet({ event, open, onOpenChange, dispatchEvent, groups = [] }: EditEventSheetProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [deleteMode, setDeleteMode] = useState<"none" | "confirm_single" | "prompt_recurring">("none");
@@ -78,11 +79,15 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   const [deadlineTime, setDeadlineTime] = useState("");
   const [surfaceDays, setSurfaceDays] = useState("3");
 
+  // Group
+  const [groupId, setGroupId] = useState(event?.group_id ?? "");
+
   function resetToEvent(e: AppEvent | null) {
     if (!e) return;
     setTitle(e.title);
     setDescription(e.description ?? "");
     setDuration(e.duration_minutes != null ? String(e.duration_minutes) : "");
+    setGroupId(e.group_id ?? "");
     setError(null);
     setDeleteMode("none");
 
@@ -116,6 +121,7 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
       title,
       description: description || undefined,
       duration_minutes: duration ? Number(duration) : null,
+      group_id: groupId || null,
     };
 
     if (event.event_type === "timed") {
@@ -301,6 +307,30 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
               placeholder="e.g. 60"
             />
           </div>
+
+          {groups.length > 0 && (
+            <div className="space-y-2">
+              <Label>Group</Label>
+              <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                <SelectTrigger>
+                  <SelectValue>
+                    {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  {groups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                        {g.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <Button type="submit" className="w-full" disabled={isPending}>
             {isPending ? "Saving…" : "Save changes"}
