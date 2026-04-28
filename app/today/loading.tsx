@@ -7,7 +7,7 @@ export default function TodayLoading() {
           <div className="h-2 w-full bg-muted rounded animate-pulse" />
         </div>
       </header>
-      <main className="flex-1 px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-4">
+      <main className="flex-1 px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-4">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />
         ))}

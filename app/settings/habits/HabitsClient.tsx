@@ -143,7 +143,7 @@ export default function HabitsClient({ habits: initialHabits, groups }: Props) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-4">
+      <main className="flex-1 overflow-y-auto px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Manage Habits</h2>
           <Button size="sm" variant="outline" onClick={() => setAddHabitOpen(true)}>

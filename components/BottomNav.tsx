@@ -15,7 +15,7 @@ export default function BottomNav() {
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/92 backdrop-blur border-t safe-bottom">
-      <div className="grid grid-cols-3 max-w-lg mx-auto px-2.5 py-2 pb-[22px]">
+      <div className="grid grid-cols-3 max-w-lg mx-auto px-2.5 py-1.5">
         {navItems.map((item) => {
           const active =
             pathname === item.href ||
@@ -26,7 +26,7 @@ export default function BottomNav() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl transition-colors",
+                "flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-xl transition-colors",
                 active ? "text-primary" : "text-muted-foreground"
               )}
             >

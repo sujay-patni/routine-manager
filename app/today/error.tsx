@@ -9,7 +9,7 @@ export default function TodayError({ reset }: { error: Error & { digest?: string
           <div className="h-2 w-48 bg-muted rounded" />
         </div>
       </header>
-      <main className="flex-1 flex flex-col items-center justify-center px-4 pb-32 text-center gap-4">
+      <main className="flex-1 flex flex-col items-center justify-center px-4 bottom-nav-offset lg:pb-8 text-center gap-4">
         <p className="text-4xl">⚠️</p>
         <h2 className="font-semibold text-lg">Notion isn&apos;t responding</h2>
         <p className="text-sm text-muted-foreground max-w-xs">
