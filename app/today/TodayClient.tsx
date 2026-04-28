@@ -31,6 +31,7 @@ interface Props {
   relativeLabel: string;
   dateStr: string;
   isLateNight: boolean;
+  syncWarnings?: string[];
 }
 
 export type OptimisticAction<T> = { action: "add" | "update" | "delete"; item: T };
@@ -123,6 +124,7 @@ export default function TodayClient({
   relativeLabel,
   dateStr,
   isLateNight,
+  syncWarnings = [],
 }: Props) {
   const [optHabits, dispatchHabit] = useOptimistic(
     habits,
@@ -154,19 +156,47 @@ export default function TodayClient({
   const [weekExpanded, setWeekExpanded] = useState(false);
   const [groupFilters, setGroupFilters] = useState<string[]>([]);
 
+  const availableFilters = useMemo(() => {
+    const groupIds = new Set<string>();
+    let hasUnassigned = false;
+
+    for (const h of optHabits) {
+      if (h.group_id) groupIds.add(h.group_id);
+      else hasUnassigned = true;
+    }
+    for (const e of optEvents) {
+      if (e.group_id) groupIds.add(e.group_id);
+      else hasUnassigned = true;
+    }
+
+    return {
+      groups: groups.filter((g) => groupIds.has(g.id)),
+      hasUnassigned,
+      ids: new Set([
+        ...Array.from(groupIds),
+        ...(hasUnassigned ? ["unassigned"] : []),
+      ]),
+    };
+  }, [groups, optHabits, optEvents]);
+
+  const activeGroupFilters = useMemo(
+    () => groupFilters.filter((id) => availableFilters.ids.has(id)),
+    [groupFilters, availableFilters]
+  );
+
   const filteredHabits = useMemo(() => {
-    if (groupFilters.length === 0) return optHabits;
+    if (activeGroupFilters.length === 0) return optHabits;
     return optHabits.filter((h) =>
-      h.group_id ? groupFilters.includes(h.group_id) : groupFilters.includes("unassigned")
+      h.group_id ? activeGroupFilters.includes(h.group_id) : activeGroupFilters.includes("unassigned")
     );
-  }, [optHabits, groupFilters]);
+  }, [optHabits, activeGroupFilters]);
 
   const filteredEvents = useMemo(() => {
-    if (groupFilters.length === 0) return optEvents;
+    if (activeGroupFilters.length === 0) return optEvents;
     return optEvents.filter((e) =>
-      e.group_id ? groupFilters.includes(e.group_id) : groupFilters.includes("unassigned")
+      e.group_id ? activeGroupFilters.includes(e.group_id) : activeGroupFilters.includes("unassigned")
     );
-  }, [optEvents, groupFilters]);
+  }, [optEvents, activeGroupFilters]);
 
   const [doneOverrides, setDoneOverrides] = useState<Map<string, boolean>>(new Map());
   function handleDoneChange(id: string, done: boolean) {
@@ -546,9 +576,14 @@ export default function TodayClient({
         </div>
       </header>
 
-      {groups.length > 0 && (
+      {(availableFilters.groups.length > 0 || availableFilters.hasUnassigned) && (
         <div className="px-4 pt-2 pb-1 max-w-2xl mx-auto w-full">
-          <GroupFilterBar groups={groups} activeFilters={groupFilters} onFilterChange={setGroupFilters} />
+          <GroupFilterBar
+            groups={availableFilters.groups}
+            activeFilters={activeGroupFilters}
+            onFilterChange={setGroupFilters}
+            showUnassigned={availableFilters.hasUnassigned}
+          />
         </div>
       )}
 
@@ -559,6 +594,15 @@ export default function TodayClient({
           <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground bg-muted/50 rounded-xl px-3 py-2.5">
             <span>🌙</span>
             <span>Late night — showing <strong>{dayLabel}</strong> habits. Your new day starts later.</span>
+          </div>
+        )}
+
+        {syncWarnings.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-[11.5px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-300">
+            <p className="font-medium">Notion sync needs attention</p>
+            {syncWarnings.map((message) => (
+              <p key={message}>{message}</p>
+            ))}
           </div>
         )}
 

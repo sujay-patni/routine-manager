@@ -15,7 +15,7 @@ export default async function TodayPage({ searchParams }: Props) {
   const params = await searchParams;
   const dateStr = params.date;
 
-  const [{ habits, today, weekStart, weekEnd, timezone, isLateNight }, events, groups] = await Promise.all([
+  const [{ habits, today, weekStart, weekEnd, timezone, isLateNight, syncWarnings }, events, groups] = await Promise.all([
     getTodayHabits(dateStr),
     getTodayEvents(dateStr),
     getAllGroups(),
@@ -49,6 +49,7 @@ export default async function TodayPage({ searchParams }: Props) {
       relativeLabel={relativeLabel}
       dateStr={today}
       isLateNight={isLateNight}
+      syncWarnings={syncWarnings}
     />
   );
 }

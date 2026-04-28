@@ -4,8 +4,25 @@ import type { SkipItemType, SkipRecord, SkipScope } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+let skipsDbUnavailable = false;
+
+export function consumeSkipsDbUnavailable(): boolean {
+  const value = skipsDbUnavailable;
+  skipsDbUnavailable = false;
+  return value;
+}
+
 function requireSkipsDb() {
   if (!SKIPS_DB) throw new Error("no_skips_db");
+}
+
+function isMissingSkipsDbError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return (
+    msg.includes("Could not find database with ID") ||
+    msg.includes("Could not find data source with ID") ||
+    msg.includes("Make sure the relevant pages and databases are shared")
+  );
 }
 
 function pageToSkip(page: any): SkipRecord {
@@ -26,32 +43,41 @@ export async function getSkipsForWindow(date: string, weekStart: string, weekEnd
   const results: any[] = [];
   let cursor: string | undefined;
 
-  do {
-    const response = await notion.dataSources.query({
-      data_source_id: SKIPS_DB,
-      filter: {
-        or: [
-          {
-            and: [
-              { property: "Scope", select: { equals: "day" } },
-              { property: "Date", date: { equals: date } },
-            ],
-          },
-          {
-            and: [
-              { property: "Scope", select: { equals: "week" } },
-              { property: "Week Start", date: { equals: weekStart } },
-              { property: "Week End", date: { equals: weekEnd } },
-            ],
-          },
-        ],
-      },
-      start_cursor: cursor,
-      page_size: 50,
-    }) as any;
-    results.push(...response.results);
-    cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
-  } while (cursor);
+  try {
+    do {
+      const response = await notion.dataSources.query({
+        data_source_id: SKIPS_DB,
+        filter: {
+          or: [
+            {
+              and: [
+                { property: "Scope", select: { equals: "day" } },
+                { property: "Date", date: { equals: date } },
+              ],
+            },
+            {
+              and: [
+                { property: "Scope", select: { equals: "week" } },
+                { property: "Week Start", date: { equals: weekStart } },
+                { property: "Week End", date: { equals: weekEnd } },
+              ],
+            },
+          ],
+        },
+        start_cursor: cursor,
+        page_size: 50,
+      }) as any;
+      results.push(...response.results);
+      cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
+    } while (cursor);
+  } catch (e) {
+    if (isMissingSkipsDbError(e)) {
+      skipsDbUnavailable = true;
+      console.warn("Skips database is unavailable; continuing without skip records.");
+      return [];
+    }
+    throw e;
+  }
 
   return results.map(pageToSkip);
 }

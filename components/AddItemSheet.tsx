@@ -82,6 +82,10 @@ function todayISO() {
   return new Intl.DateTimeFormat("en-CA").format(new Date()); // "en-CA" gives YYYY-MM-DD
 }
 
+function addMinutesToISO(iso: string, minutes: number): string {
+  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+}
+
 export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit", defaultDate, dispatchHabit, dispatchEvent, groups = [] }: AddItemSheetProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +121,6 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [eventDesc, setEventDesc] = useState("");
   const [eventDate, setEventDate] = useState(todayISO);
   const [eventTime, setEventTime] = useState("09:00");
-  const [eventEndTime, setEventEndTime] = useState("");
   const [eventDuration, setEventDuration] = useState("");
   const [dueDate, setDueDate] = useState(todayISO);
   const [dueTime, setDueTime] = useState("");
@@ -157,7 +160,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     setHabitTarget2(""); setHabitStart("0");
     setHabitProgressPeriod("daily");
     setEventTitle(""); setEventDesc(""); setEventDate(baseDate()); setEventTime("09:00");
-    setEventEndTime(""); setEventDuration(""); setDueDate(baseDate()); setDueTime("");
+    setEventDuration(""); setDueDate(baseDate()); setDueTime("");
     setSurfaceDays(3); setRecurrence("none"); setEventDays([]);
     setEventTimeOfDay(""); setEventShowExact(false);
     setGroupId("");
@@ -228,6 +231,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     e.preventDefault();
     if (!habitName.trim()) return;
     setError(null);
+    setWarning(null);
     const convLeft = Number(habitConvLeft) || 1;
     const convRight = Number(habitConvRight) || 1;
     const conversionVal = habitProgressOn && !isTimeUnit(habitMetric) ? convRight / convLeft : undefined;
@@ -251,6 +255,12 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     };
 
     startTransition(async () => {
+      const result = await createHabit(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchHabit) {
         dispatchHabit({
           action: "add",
@@ -277,20 +287,26 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
           } as ProcessedHabit
         });
       }
-      const result = await createHabit(payload);
-      if (result.error) console.error("Error creating habit:", result.error);
-    });
 
-    resetForms();
-    onOpenChange(false);
+      if (result.warning) {
+        resetForms();
+        setWarning(result.warning);
+        return;
+      }
+
+      resetForms();
+      onOpenChange(false);
+    });
   }
 
   function handleTimedEventSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
     setError(null);
+    setWarning(null);
     const startISO = new Date(`${eventDate}T${eventTime}:00`).toISOString();
-    const endISO = eventEndTime ? new Date(`${eventDate}T${eventEndTime}:00`).toISOString() : undefined;
+    const durationMinutes = eventDuration ? Number(eventDuration) : undefined;
+    const endISO = durationMinutes ? addMinutesToISO(startISO, durationMinutes) : undefined;
     const rrule = buildRRule(recurrence, eventDays);
     const payload = {
       title: eventTitle.trim(),
@@ -300,29 +316,33 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       end_time: endISO,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
-      duration_minutes: eventDuration ? Number(eventDuration) : undefined,
+      duration_minutes: durationMinutes,
       group_id: groupId || null,
     };
 
     startTransition(async () => {
+      const result = await createEvent(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchEvent) {
         dispatchEvent({
           action: "add",
           item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
         });
       }
-      const result = await createEvent(payload);
-      if (result.error) console.error("Error creating bounded event:", result.error);
+      resetForms();
+      onOpenChange(false);
     });
-
-    resetForms();
-    onOpenChange(false);
   }
 
   function handleAllDaySubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
     setError(null);
+    setWarning(null);
     const rrule = buildRRule(recurrence, eventDays);
     const payload = {
       title: eventTitle.trim(),
@@ -336,24 +356,28 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     };
 
     startTransition(async () => {
+      const result = await createEvent(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchEvent) {
         dispatchEvent({
           action: "add",
           item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
         });
       }
-      const result = await createEvent(payload);
-      if (result.error) console.error("Error creating all-day event:", result.error);
+      resetForms();
+      onOpenChange(false);
     });
-
-    resetForms();
-    onOpenChange(false);
   }
 
   function handleDeadlineSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
     setError(null);
+    setWarning(null);
     
     const payload = {
       title: eventTitle.trim(),
@@ -367,18 +391,21 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     };
 
     startTransition(async () => {
+      const result = await createEvent(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchEvent) {
         dispatchEvent({
           action: "add",
           item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
         });
       }
-      const result = await createEvent(payload);
-      if (result.error) console.error("Error creating deadline:", result.error);
+      resetForms();
+      onOpenChange(false);
     });
-
-    resetForms();
-    onOpenChange(false);
   }
 
   const handleOpenChange = (o: boolean) => { if (!o) resetForms(); onOpenChange(o); };
@@ -737,10 +764,6 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>End time</Label>
-                  <Input type="time" value={eventEndTime} onChange={e => setEventEndTime(e.target.value)} />
-                </div>
-                <div className="space-y-2">
                   <Label>Repeat</Label>
                   <Select value={recurrence} onValueChange={v => v && setRecurrence(v)}>
                     <SelectTrigger>
@@ -778,7 +801,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Default duration (min)</Label>
+                  <Label>Duration (min)</Label>
                   <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 60" />
                 </div>
                 <div className="space-y-2">

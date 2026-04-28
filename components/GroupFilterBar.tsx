@@ -7,14 +7,20 @@ interface GroupFilterBarProps {
   groups: Group[];
   activeFilters: string[];
   onFilterChange: (filters: string[]) => void;
+  showUnassigned?: boolean;
 }
 
-export default function GroupFilterBar({ groups, activeFilters, onFilterChange }: GroupFilterBarProps) {
-  if (groups.length === 0) return null;
+export default function GroupFilterBar({
+  groups,
+  activeFilters,
+  onFilterChange,
+  showUnassigned = true,
+}: GroupFilterBarProps) {
+  if (groups.length === 0 && !showUnassigned) return null;
 
   const pills: Array<{ id: string; label: string; color?: string }> = [
     { id: "all", label: "All" },
-    { id: "unassigned", label: "Not Assigned" },
+    ...(showUnassigned ? [{ id: "unassigned", label: "Not Assigned" }] : []),
     ...groups.map((g) => ({ id: g.id, label: g.name, color: g.color })),
   ];
 

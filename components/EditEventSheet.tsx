@@ -52,6 +52,18 @@ function isoTimePart(isoStr: string | null | undefined): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+function durationFromRange(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start || !end) return "";
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return "";
+  return String(Math.round((endMs - startMs) / 60_000));
+}
+
+function addMinutesToISO(iso: string, minutes: number): string {
+  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+}
+
 export default function EditEventSheet({ event, open, onOpenChange, dispatchEvent, groups = [] }: EditEventSheetProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -67,7 +79,6 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   // Timed-specific
   const [eventDate, setEventDate] = useState("");
   const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
 
   // All-day-specific
   const [taskDate, setTaskDate] = useState("");
@@ -86,7 +97,13 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     if (!e) return;
     setTitle(e.title);
     setDescription(e.description ?? "");
-    setDuration(e.duration_minutes != null ? String(e.duration_minutes) : "");
+    setDuration(
+      e.duration_minutes != null
+        ? String(e.duration_minutes)
+        : e.event_type === "timed"
+          ? durationFromRange(e.start_time, e.end_time)
+          : ""
+    );
     setGroupId(e.group_id ?? "");
     setError(null);
     setDeleteMode("none");
@@ -94,7 +111,6 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     if (e.event_type === "timed") {
       setEventDate(isoDatePart(e.start_time));
       setStartTime(isoTimePart(e.start_time));
-      setEndTime(isoTimePart(e.end_time));
     } else if (e.event_type === "all_day") {
       setTaskDate(e.due_date ?? "");
       setTimeOfDay(e.time_of_day ?? "");
@@ -126,8 +142,9 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
 
     if (event.event_type === "timed") {
       const dateStr = eventDate || isoDatePart(event.start_time);
-      data.start_time = startTime ? new Date(`${dateStr}T${startTime}:00`).toISOString() : null;
-      data.end_time = endTime ? new Date(`${dateStr}T${endTime}:00`).toISOString() : null;
+      const startISO = startTime ? new Date(`${dateStr}T${startTime}:00`).toISOString() : null;
+      data.start_time = startISO;
+      data.end_time = startISO && duration ? addMinutesToISO(startISO, Number(duration)) : null;
     } else if (event.event_type === "all_day") {
       data.due_date = taskDate || null;
       data.time_of_day = timeOfDay || null;
@@ -234,8 +251,8 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
                   <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>End time <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                  <Label>Duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 60" />
                 </div>
               </div>
             </>
@@ -297,16 +314,18 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
           )}
 
           {/* Duration */}
-          <div className="space-y-2">
-            <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Input
-              type="number"
-              min={1}
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              placeholder="e.g. 60"
-            />
-          </div>
+          {event?.event_type !== "timed" && (
+            <div className="space-y-2">
+              <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                type="number"
+                min={1}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                placeholder="e.g. 60"
+              />
+            </div>
+          )}
 
           {groups.length > 0 && (
             <div className="space-y-2">

@@ -26,9 +26,11 @@ import {
 } from "@/lib/habit-logic";
 import {
   createSkip,
+  consumeSkipsDbUnavailable,
   deleteSkip,
   getSkipsForWindow,
 } from "@/lib/notion/skips";
+import { consumeVacationDbUnavailable, getVacationsOverlapping } from "@/lib/notion/vacations";
 import { getSettings } from "@/app/actions/settings";
 import { getTodayEvents } from "@/app/actions/events";
 import { toZonedTime } from "date-fns-tz";
@@ -53,6 +55,11 @@ const cachedGetCompletionsForWeek = unstable_cache(getCompletionsForWeek, ["comp
 
 const cachedGetSkipsForWindow = unstable_cache(getSkipsForWindow, ["skips-window"], {
   tags: ["skips"],
+  revalidate: 60,
+});
+
+const cachedGetVacationsOverlapping = unstable_cache(getVacationsOverlapping, ["vacations-overlap"], {
+  tags: ["vacations"],
   revalidate: 60,
 });
 
@@ -126,10 +133,47 @@ export async function getTodayHabits(dateStr?: string) {
     fetchStart = todayStr.slice(0, 7) + "-01";
   }
 
-  const [completions, skips] = await Promise.all([
+  const [completions, skips, vacations] = await Promise.all([
     cachedGetCompletionsForWeek(fetchStart, weekEndStr),
     cachedGetSkipsForWindow(todayStr, weekStartStr, weekEndStr),
+    cachedGetVacationsOverlapping(weekStartStr, weekEndStr),
   ]);
+  const syncWarnings = [
+    ...(consumeSkipsDbUnavailable()
+      ? ["Skips are temporarily unavailable, so skipped habits and events may appear active."]
+      : []),
+    ...(consumeVacationDbUnavailable()
+      ? ["Vacations are temporarily unavailable, so paused habits may appear active."]
+      : []),
+  ];
+
+  // Build per-habit vacation pause map: which dates in [weekStart, weekEnd] is
+  // each habit on vacation? Group selection expands at query time so adding a
+  // habit to a paused group later auto-includes it.
+  const vacationDatesByHabit = new Map<string, Set<string>>();
+  for (const v of vacations) {
+    if (!v.start_date || !v.end_date) continue;
+    const overlapStart = v.start_date > weekStartStr ? v.start_date : weekStartStr;
+    const overlapEnd = v.end_date < weekEndStr ? v.end_date : weekEndStr;
+    if (overlapStart > overlapEnd) continue;
+    const dates: string[] = [];
+    let cur = overlapStart;
+    while (cur <= overlapEnd) {
+      dates.push(cur);
+      const d = new Date(cur + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + 1);
+      cur = d.toISOString().slice(0, 10);
+    }
+    const groupSet = new Set(v.group_ids);
+    const habitSet = new Set(v.habit_ids);
+    for (const h of allHabits) {
+      const hit = habitSet.has(h.id) || (h.group_id != null && groupSet.has(h.group_id));
+      if (!hit) continue;
+      let acc = vacationDatesByHabit.get(h.id);
+      if (!acc) { acc = new Set(); vacationDatesByHabit.set(h.id, acc); }
+      for (const d of dates) acc.add(d);
+    }
+  }
 
   // Only include habits that existed on or before the target date
   const habits = allHabits.filter((h) => {
@@ -146,6 +190,8 @@ export async function getTodayHabits(dateStr?: string) {
         (s.scope === "week" && s.week_start === weekStartStr && s.week_end === weekEndStr)
       )
     );
+    const habitVacationDates = vacationDatesByHabit.get(h.id);
+    const isOnVacationToday = !!habitVacationDates?.has(todayStr);
     const skippedDatesForWeek = skips
       .filter((s) =>
         s.item_type === "habit" &&
@@ -159,6 +205,11 @@ export async function getTodayHabits(dateStr?: string) {
         if (s.scope === "day") return s.date ? [s.date] : [];
         return [weekStartStr];
       });
+    if (habitVacationDates) {
+      for (const d of habitVacationDates) {
+        if (!skippedDatesForWeek.includes(d)) skippedDatesForWeek.push(d);
+      }
+    }
     // All completions for this habit in the fetched range
     const allHabitCompletions = completions.filter((c) => c.habit_id === h.id);
     // Week completions (for weekly target tracking)
@@ -218,8 +269,8 @@ export async function getTodayHabits(dateStr?: string) {
       week_progress,
       today_completion_id: todayCompletions[0]?.id ?? null,
       skip_id: skip?.id ?? null,
-      is_skipped: !!skip,
-      skip_scope: skip?.scope ?? null,
+      is_skipped: !!skip || isOnVacationToday,
+      skip_scope: skip?.scope ?? (isOnVacationToday ? "day" : null),
       completions_by_date: completedDatesForWeek,
       skipped_dates: h.frequency === "weekly"
         ? []
@@ -242,6 +293,7 @@ export async function getTodayHabits(dateStr?: string) {
     weekEnd: weekEndStr,
     timezone,
     isLateNight,
+    syncWarnings,
   };
 }
 
