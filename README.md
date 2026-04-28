@@ -8,6 +8,7 @@ It is built for one person, works well on mobile, installs as a PWA, and keeps t
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=111)
 ![Notion](https://img.shields.io/badge/Storage-Notion-black?logo=notion)
 ![PWA](https://img.shields.io/badge/PWA-ready-5a0fc8)
+[![CI](https://github.com/sujay-patni/routine-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/sujay-patni/routine-manager/actions/workflows/ci.yml)
 
 ## What You Can Do
 
@@ -160,7 +161,7 @@ Routine stores data in Notion databases. The app expects these core entities:
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/sujay-patni/routine-manager.git
 cd routine-manager
 ```
 
@@ -181,7 +182,13 @@ The integration needs access to read, create, update, and archive pages in the d
 
 ### 4. Create `.env.local`
 
-Create a `.env.local` file in the project root:
+Copy the example environment file and fill in your own Notion database IDs and secrets:
+
+```bash
+cp .env.example .env.local
+```
+
+The file should contain values like these:
 
 ```bash
 NOTION_API_KEY=secret_xxx
@@ -425,6 +432,12 @@ The app works well on Vercel.
 
 Make sure your Notion integration has access to every database you configured.
 
+## Security and Privacy
+
+Routine is intended for self-hosting with your own Notion workspace. Do not commit `.env.local`, Notion integration tokens, passphrases, cookie secrets, or database IDs from a private workspace.
+
+The passphrase gate is useful for a personal deployment, but it is not a full multi-user authentication system. If you expose the app beyond your own use, put it behind your hosting provider's access controls or add a real auth provider.
+
 ## PWA Installation
 
 Routine includes a web app manifest and service worker setup. In production, browsers can offer install prompts for a standalone app experience.
@@ -504,3 +517,18 @@ This repository is intentionally personal-first. If you fork it, expect to custo
 - Vacation presets
 
 The app is a strong base for a private routine system, but it is not designed as a hosted multi-tenant SaaS.
+
+## Contributing
+
+Issues and small pull requests are welcome. Please keep changes focused, include screenshots for UI changes, and run these checks before opening a PR:
+
+```bash
+npm run lint
+npm run build
+```
+
+For larger features, open an issue first so the approach can be discussed.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
