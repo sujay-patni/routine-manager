@@ -588,7 +588,7 @@ export default function TodayClient({
       )}
 
       {/* Content */}
-      <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-6">
+      <main className="flex-1 overflow-y-auto px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-6">
 
         {isLateNight && (
           <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground bg-muted/50 rounded-xl px-3 py-2.5">
@@ -987,7 +987,7 @@ export default function TodayClient({
       {/* Day Log FAB */}
       <button
         onClick={() => setDayLogOpen(true)}
-        className="fixed bottom-20 left-4 lg:bottom-6 z-40 w-12 h-12 rounded-full bg-card border shadow-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all active:scale-95"
+        className="fixed bottom-fab-offset left-4 lg:bottom-6 z-50 w-12 h-12 rounded-full bg-card border shadow-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all active:scale-95"
         aria-label="View day log"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -997,7 +997,7 @@ export default function TodayClient({
       </button>
 
       {/* FAB with dropdown */}
-      <div ref={fabRef} className="fixed bottom-20 right-4 lg:bottom-6 z-40 flex flex-col items-end gap-2">
+      <div ref={fabRef} className="fixed bottom-fab-offset right-4 lg:bottom-6 z-50 flex flex-col items-end gap-2">
         {/* Dropdown menu */}
         {fabOpen && (
           <div className="bg-card border rounded-2xl shadow-lg overflow-hidden mb-1 min-w-[140px]">

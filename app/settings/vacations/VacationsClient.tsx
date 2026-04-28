@@ -216,7 +216,7 @@ export default function VacationsClient({ vacations, templates, habits, groups, 
       </header>
 
       <main
-        className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-6"
+        className="flex-1 overflow-y-auto px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-6"
         onClick={() => { if (openMenu) setOpenMenu(null); }}
       >
         <div className="flex items-center justify-end gap-2">

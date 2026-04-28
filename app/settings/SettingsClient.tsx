@@ -124,7 +124,7 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-8">
+      <main className="flex-1 overflow-y-auto px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-8">
 
         {/* ─── Preferences ─── */}
         <section className="space-y-4">

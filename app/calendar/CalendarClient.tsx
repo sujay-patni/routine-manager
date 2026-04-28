@@ -778,7 +778,7 @@ export default function CalendarClient({ events, groups }: Props) {
       {/* View content */}
       <main className={cn(
         "flex-1 max-w-4xl mx-auto w-full",
-        view === "day" || view === "week" ? "overflow-hidden flex flex-col" : "overflow-y-auto pb-24"
+        view === "day" || view === "week" ? "overflow-hidden flex flex-col bottom-nav-offset lg:pb-0" : "overflow-y-auto bottom-nav-offset lg:pb-8"
       )}>
         {view === "month"    && <MonthView />}
         {view === "year"     && <YearView />}

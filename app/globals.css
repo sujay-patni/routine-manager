@@ -156,6 +156,12 @@
 }
 
 @layer utilities {
+  .bottom-nav-offset {
+    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+  }
+  .bottom-fab-offset {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
   .card-elevated {
     box-shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.03);
   }

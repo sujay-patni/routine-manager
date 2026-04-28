@@ -154,7 +154,7 @@ export default function GroupsClient({ groups: initialGroups, habits, events }: 
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-2xl mx-auto w-full space-y-3">
+      <main className="flex-1 overflow-y-auto px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-3">
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50/60 dark:border-red-900 dark:bg-red-950/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">
             {error}
