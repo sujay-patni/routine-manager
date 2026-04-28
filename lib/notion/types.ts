@@ -90,6 +90,17 @@ export interface Group {
   sort_order: number | null;
 }
 
+export interface Vacation {
+  id: string;
+  name: string;
+  is_template: boolean;
+  start_date: string | null;  // YYYY-MM-DD; null for templates
+  end_date: string | null;    // YYYY-MM-DD; null for templates
+  habit_ids: string[];
+  group_ids: string[];
+  note: string | null;
+}
+
 export interface AppSettings {
   id: string;
   timezone: string;

@@ -4,15 +4,40 @@ import type { AppEvent, TimeOfDay } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+function durationFromRange(start: string | null | undefined, end: string | null | undefined): number | null {
+  if (!start || !end) return null;
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return null;
+  return Math.round((endMs - startMs) / 60_000);
+}
+
+function isMissingDurationPropertyError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.includes("Duration is not a property") || msg.includes("Duration is not a property that exists");
+}
+
+async function ensureDurationProperties(): Promise<void> {
+  await (notion.dataSources as any).update({
+    data_source_id: EVENTS_DB,
+    properties: {
+      Duration: { number: {} },
+      "Duration Actual": { number: {} },
+    },
+  });
+}
+
 function pageToEvent(page: any): AppEvent {
   const props = page.properties;
+  const startTime = props["Start Time"]?.date?.start ?? null;
+  const endTime = props["End Time"]?.date?.start ?? null;
   return {
     id: page.id,
     title: getText(props["Title"]),
     description: getText(props["Description"]) || null,
     event_type: (getSelect(props["Type"]) as AppEvent["event_type"]) || "all_day",
-    start_time: props["Start Time"]?.date?.start ?? null,
-    end_time: props["End Time"]?.date?.start ?? null,
+    start_time: startTime,
+    end_time: endTime,
     due_date: getDate(props["Due Date"]) || null,
     is_recurring: getCheckbox(props["Recurring"]),
     recurrence_rule: getText(props["Recurrence Rule"]) || null,
@@ -21,7 +46,7 @@ function pageToEvent(page: any): AppEvent {
     time_of_day: (getSelect(props["Time of Day"]) as TimeOfDay) || null,
     due_time: getText(props["Due Time"]) || null,
     group_id: getRelationIds(props["Group"])[0] ?? null,
-    duration_minutes: props["Duration"]?.number ?? null,
+    duration_minutes: props["Duration"]?.number ?? durationFromRange(startTime, endTime),
     duration_actual: props["Duration Actual"]?.number ?? null,
   };
 }
@@ -114,10 +139,20 @@ export async function createEvent(data: {
   if (data.duration_minutes != null) props["Duration"] = { number: data.duration_minutes };
   if (data.group_id) props["Group"] = { relation: [{ id: data.group_id }] };
 
-  const page = await notion.pages.create({
-    parent: { data_source_id: EVENTS_DB },
-    properties: props,
-  }) as any;
+  let page: any;
+  try {
+    page = await notion.pages.create({
+      parent: { data_source_id: EVENTS_DB },
+      properties: props,
+    });
+  } catch (e) {
+    if (!props["Duration"] || !isMissingDurationPropertyError(e)) throw e;
+    await ensureDurationProperties();
+    page = await notion.pages.create({
+      parent: { data_source_id: EVENTS_DB },
+      properties: props,
+    });
+  }
 
   return pageToEvent(page);
 }
@@ -139,10 +174,7 @@ export async function setEventCompleted(id: string, isCompleted: boolean, durati
     const msg: string = e?.message ?? String(e);
     const isMissingColumn = msg.includes("is not a property that exists") || msg.includes("not a property");
     if (!isMissingColumn) throw e;
-    await (notion.dataSources as any).update({
-      data_source_id: EVENTS_DB,
-      properties: { "Duration": { number: {} }, "Duration Actual": { number: {} } },
-    });
+    await ensureDurationProperties();
     await notion.pages.update({ page_id: id, properties: props });
   }
 }
@@ -211,5 +243,11 @@ export async function updateEvent(
   if (data.duration_minutes !== undefined) props["Duration"] = { number: data.duration_minutes };
   if (data.group_id !== undefined) props["Group"] = data.group_id ? { relation: [{ id: data.group_id }] } : { relation: [] };
 
-  await notion.pages.update({ page_id: id, properties: props });
+  try {
+    await notion.pages.update({ page_id: id, properties: props });
+  } catch (e) {
+    if (!props["Duration"] || !isMissingDurationPropertyError(e)) throw e;
+    await ensureDurationProperties();
+    await notion.pages.update({ page_id: id, properties: props });
+  }
 }

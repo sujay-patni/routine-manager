@@ -17,7 +17,10 @@ export default function BottomNav() {
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/92 backdrop-blur border-t safe-bottom">
       <div className="grid grid-cols-3 max-w-lg mx-auto px-2.5 py-2 pb-[22px]">
         {navItems.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "?");
+          const active =
+            pathname === item.href ||
+            pathname.startsWith(item.href + "/") ||
+            pathname.startsWith(item.href + "?");
           return (
             <Link
               key={item.href}
