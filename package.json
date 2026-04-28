@@ -1,7 +1,24 @@
 {
-  "name": "routine",
+  "name": "routine-manager",
   "version": "0.1.0",
+  "description": "A personal routine manager that uses Notion as the source of truth for habits, events, tasks, deadlines, and progress.",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sujay-patni/routine-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sujay-patni/routine-manager/issues"
+  },
+  "homepage": "https://github.com/sujay-patni/routine-manager#readme",
+  "keywords": [
+    "routine",
+    "habits",
+    "notion",
+    "pwa",
+    "nextjs"
+  ],
   "scripts": {
     "dev": "node scripts/run-with-required-node.mjs node_modules/next/dist/bin/next dev --webpack",
     "build": "node scripts/run-with-required-node.mjs node_modules/next/dist/bin/next build --webpack",

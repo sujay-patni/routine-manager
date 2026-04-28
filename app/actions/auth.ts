@@ -35,6 +35,9 @@ export async function validatePassphrase(
   if (!passphrase) {
     return { error: "App is not configured. Set APP_PASSPHRASE env var." };
   }
+  if (!process.env.COOKIE_SECRET?.trim()) {
+    return { error: "App is not configured. Set COOKIE_SECRET env var." };
+  }
 
   if (input !== passphrase) {
     return { error: "Incorrect passphrase." };

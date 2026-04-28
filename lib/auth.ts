@@ -8,19 +8,27 @@ const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 60 * 60 * 1000; // 1 hour
 
+function getCookieSecret(): string | null {
+  return process.env.COOKIE_SECRET?.trim() || null;
+}
+
 export function signCookie(value: string): string {
-  const secret = process.env.COOKIE_SECRET ?? "fallback-secret-change-me";
+  const secret = getCookieSecret();
+  if (!secret) {
+    throw new Error("COOKIE_SECRET is required to sign auth cookies.");
+  }
   const hmac = createHmac("sha256", secret).update(value).digest("hex");
   return `${value}.${hmac}`;
 }
 
 export function verifyCookie(cookie: string | undefined): boolean {
   if (!cookie) return false;
+  const secret = getCookieSecret();
+  if (!secret) return false;
   const lastDot = cookie.lastIndexOf(".");
   if (lastDot === -1) return false;
   const value = cookie.slice(0, lastDot);
   const sig = cookie.slice(lastDot + 1);
-  const secret = process.env.COOKIE_SECRET ?? "fallback-secret-change-me";
   const expected = createHmac("sha256", secret).update(value).digest("hex");
   try {
     return timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
