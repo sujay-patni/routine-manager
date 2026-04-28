@@ -5,22 +5,26 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, format, isSameMonth, isSameDay, isSameWeek, isSameYear,
   addMonths, addWeeks, addDays,
-  addYears, isToday,
-  getMonth, getYear, parseISO,
+  addYears, isToday, endOfQuarter,
+  getYear, parseISO,
 } from "date-fns";
 // removed toZonedTime import
 import { parseZonedOrLocal } from "@/lib/habit-logic";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditEventSheet from "@/components/EditEventSheet";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/components/SettingsProvider";
+import GroupFilterBar from "@/components/GroupFilterBar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type CalendarView = "day" | "week" | "month" | "year" | "schedule";
+type ScheduleRange = "today" | "week" | "month" | "quarter" | "year";
 
 interface Props {
   events: AppEvent[];
+  groups: Group[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,17 +91,18 @@ function eventIcon(event: AppEvent): string {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function CalendarClient({ events }: Props) {
+export default function CalendarClient({ events, groups }: Props) {
   const { timezone, week_start_day: weekStartDay } = useSettings();
+  const [groupFilters, setGroupFilters] = useState<string[]>([]);
   const [view, setView] = useState<CalendarView>("month");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editingEvent, setEditingEvent] = useState<AppEvent | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addTab, setAddTab] = useState<"habit" | "timed" | "all_day" | "deadline">("timed");
   const [addDefaultDate, setAddDefaultDate] = useState<string | undefined>();
   const [addDropdownOpen, setAddDropdownOpen] = useState(false);
+  const [scheduleRange, setScheduleRange] = useState<ScheduleRange>("quarter");
   const addDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -112,6 +117,75 @@ export default function CalendarClient({ events }: Props) {
   }, [addDropdownOpen]);
 
   const weekStartsOn = (weekStartDay === 0 ? 0 : 1) as 0 | 1;
+
+  const scheduleDateRange = useMemo(() => {
+    const today = new Date();
+    const start = format(today, "yyyy-MM-dd");
+    const endDate =
+      scheduleRange === "today" ? today :
+      scheduleRange === "week" ? endOfWeek(today, { weekStartsOn }) :
+      scheduleRange === "month" ? endOfMonth(today) :
+      scheduleRange === "year" ? new Date(getYear(today), 11, 31) :
+      endOfQuarter(today);
+
+    return {
+      start,
+      end: format(endDate, "yyyy-MM-dd"),
+    };
+  }, [scheduleRange, weekStartsOn]);
+
+  const visibleDateRange = useMemo(() => {
+    if (view === "day") {
+      const day = format(currentDate, "yyyy-MM-dd");
+      return { start: day, end: day };
+    }
+    if (view === "week") {
+      return {
+        start: format(startOfWeek(currentDate, { weekStartsOn }), "yyyy-MM-dd"),
+        end: format(endOfWeek(currentDate, { weekStartsOn }), "yyyy-MM-dd"),
+      };
+    }
+    if (view === "month") {
+      return {
+        start: format(startOfMonth(currentDate), "yyyy-MM-dd"),
+        end: format(endOfMonth(currentDate), "yyyy-MM-dd"),
+      };
+    }
+    if (view === "year") {
+      const year = getYear(currentDate);
+      return {
+        start: `${year}-01-01`,
+        end: `${year}-12-31`,
+      };
+    }
+    return scheduleDateRange;
+  }, [currentDate, scheduleDateRange, view, weekStartsOn]);
+
+  const availableFilters = useMemo(() => {
+    const groupIds = new Set<string>();
+    let hasUnassigned = false;
+
+    for (const event of events) {
+      const dateStr = getEventDate(event, timezone);
+      if (!dateStr || dateStr < visibleDateRange.start || dateStr > visibleDateRange.end) continue;
+      if (event.group_id) groupIds.add(event.group_id);
+      else hasUnassigned = true;
+    }
+
+    return {
+      groups: groups.filter((g) => groupIds.has(g.id)),
+      hasUnassigned,
+      ids: new Set([
+        ...Array.from(groupIds),
+        ...(hasUnassigned ? ["unassigned"] : []),
+      ]),
+    };
+  }, [events, groups, timezone, visibleDateRange]);
+
+  const activeGroupFilters = useMemo(
+    () => groupFilters.filter((id) => availableFilters.ids.has(id)),
+    [groupFilters, availableFilters]
+  );
 
   // Current time for day/week indicator
   const [now, setNow] = useState(new Date());
@@ -129,23 +203,16 @@ export default function CalendarClient({ events }: Props) {
     else if (view === "year") setCurrentDate((c) => addYears(c, d));
   }
 
-  function headerLabel(): string {
-    if (view === "day") return format(currentDate, "EEEE, MMMM d, yyyy");
-    if (view === "week") {
-      const ws = startOfWeek(currentDate, { weekStartsOn });
-      const we = endOfWeek(currentDate, { weekStartsOn });
-      if (getMonth(ws) === getMonth(we)) return format(ws, "MMMM yyyy");
-      return `${format(ws, "MMM")} – ${format(we, "MMM yyyy")}`;
-    }
-    if (view === "month") return format(currentDate, "MMMM yyyy");
-    if (view === "year") return format(currentDate, "yyyy");
-    return "Schedule";
-  }
-
-  // Index events by date
+  // Index events by date (respects group filter)
   const eventsByDate = useMemo(() => {
+    const filtered = (() => {
+      if (activeGroupFilters.length === 0) return events;
+      return events.filter((e) =>
+        e.group_id ? activeGroupFilters.includes(e.group_id) : activeGroupFilters.includes("unassigned")
+      );
+    })();
     const map = new Map<string, AppEvent[]>();
-    for (const event of events) {
+    for (const event of filtered) {
       const dateStr = getEventDate(event, timezone);
       if (!dateStr) continue;
       const list = map.get(dateStr) ?? [];
@@ -153,7 +220,7 @@ export default function CalendarClient({ events }: Props) {
       map.set(dateStr, list);
     }
     return map;
-  }, [events, timezone]);
+  }, [events, timezone, activeGroupFilters]);
 
   function openAdd(tab: "habit" | "timed" | "all_day" | "deadline", dateStr?: string) {
     setAddTab(tab);
@@ -195,7 +262,7 @@ export default function CalendarClient({ events }: Props) {
           top: `${top}px`,
           height: `${height}px`,
           width: colWidth,
-          backgroundColor: eventTypeColorHex(event.event_type),
+          backgroundColor: groups.find((g) => g.id === event.group_id)?.color ?? eventTypeColorHex(event.event_type),
           minHeight: "24px",
         }}
       >
@@ -428,8 +495,11 @@ export default function CalendarClient({ events }: Props) {
                       tabIndex={0}
                       onClick={(ev) => { ev.stopPropagation(); setEditingEvent(e); }}
                       onKeyDown={(ev) => ev.key === "Enter" && (ev.stopPropagation(), setEditingEvent(e))}
-                      className={cn("text-[10px] px-1 py-0.5 rounded text-white text-left truncate w-full cursor-pointer", eventTypeColor(e.event_type))}
+                      className={cn("text-[10px] px-1 py-0.5 rounded text-white text-left truncate w-full cursor-pointer flex items-center gap-1", eventTypeColor(e.event_type))}
                     >
+                      {groups.find((g) => g.id === e.group_id) && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white/70 flex-shrink-0" />
+                      )}
                       {e.title}
                     </div>
                   ))}
@@ -502,23 +572,27 @@ export default function CalendarClient({ events }: Props) {
     );
   }
 
+  const SCHEDULE_RANGE_LABELS: Record<ScheduleRange, string> = {
+    today: "Today",
+    week: "This week",
+    month: "This month",
+    quarter: "This quarter",
+    year: "This year",
+  };
+
   // ── Schedule view ─────────────────────────────────────────────────────────
   function ScheduleView() {
-    const todayStr = format(new Date(), "yyyy-MM-dd");
-    const endStr = `${getYear(new Date())}-06-30`;
-
-    // Collect all event dates in range, sorted
+    // Collect filtered event dates in range, sorted.
     const dateSet = new Set<string>();
-    for (const event of events) {
-      const ds = getEventDate(event, timezone);
-      if (ds && ds >= todayStr && ds <= endStr) dateSet.add(ds);
+    for (const [ds] of eventsByDate) {
+      if (ds >= scheduleDateRange.start && ds <= scheduleDateRange.end) dateSet.add(ds);
     }
     const sortedDates = Array.from(dateSet).sort();
 
     if (sortedDates.length === 0) {
       return (
         <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-          No upcoming events through June 30.
+          No upcoming events in {SCHEDULE_RANGE_LABELS[scheduleRange].toLowerCase()}.
         </div>
       );
     }
@@ -526,9 +600,11 @@ export default function CalendarClient({ events }: Props) {
     return (
       <div className="divide-y">
         {sortedDates.map((ds) => {
-          const dayEvents = (eventsByDate.get(ds) ?? []).filter(
-            (e) => getEventDate(e, timezone) === ds
-          );
+          const dayEvents = (eventsByDate.get(ds) ?? []).filter((e) => {
+            const eventDate = getEventDate(e, timezone);
+            return eventDate != null && eventDate >= scheduleDateRange.start && eventDate <= scheduleDateRange.end;
+          });
+          if (dayEvents.length === 0) return null;
           return (
             <div key={ds} className="px-4 py-3">
               <div className="flex items-baseline gap-2 mb-2">
@@ -549,7 +625,10 @@ export default function CalendarClient({ events }: Props) {
                       </p>
                       <p className="text-xs text-muted-foreground">{formatEventTime(e, timezone)}</p>
                     </div>
-                    <span className={cn("w-2 h-2 rounded-full flex-shrink-0", eventTypeColor(e.event_type))} />
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: groups.find((g) => g.id === e.group_id)?.color ?? eventTypeColorHex(e.event_type) }}
+                    />
                   </button>
                 ))}
               </div>
@@ -667,7 +746,34 @@ export default function CalendarClient({ events }: Props) {
             </div>
           </div>
         </div>
+        {view === "schedule" && (
+          <div className="max-w-4xl mx-auto mt-3 flex justify-end">
+            <Select value={scheduleRange} onValueChange={(value) => setScheduleRange(value as ScheduleRange)}>
+              <SelectTrigger size="sm" className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["today", "week", "month", "quarter", "year"] as ScheduleRange[]).map((range) => (
+                  <SelectItem key={range} value={range}>
+                    {SCHEDULE_RANGE_LABELS[range]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </header>
+
+      {(availableFilters.groups.length > 0 || availableFilters.hasUnassigned) && (
+        <div className="px-4 py-2 border-b max-w-4xl mx-auto w-full">
+          <GroupFilterBar
+            groups={availableFilters.groups}
+            activeFilters={activeGroupFilters}
+            onFilterChange={setGroupFilters}
+            showUnassigned={availableFilters.hasUnassigned}
+          />
+        </div>
+      )}
 
       {/* View content */}
       <main className={cn(
@@ -745,12 +851,14 @@ export default function CalendarClient({ events }: Props) {
         event={editingEvent}
         open={!!editingEvent}
         onOpenChange={(o) => { if (!o) setEditingEvent(null); }}
+        groups={groups}
       />
       <AddItemSheet
         open={addOpen}
         onOpenChange={setAddOpen}
         defaultTab={addTab}
         defaultDate={addDefaultDate}
+        groups={groups}
       />
     </div>
   );

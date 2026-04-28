@@ -11,7 +11,7 @@ import {
 import { toZonedTime } from "date-fns-tz";
 import type { Habit } from "./notion/types";
 
-export type HabitState = "done" | "satisfied" | "urgent" | "pending" | "optional";
+export type HabitState = "done" | "satisfied" | "skipped" | "urgent" | "pending" | "optional";
 
 export function parseZonedOrLocal(dateStr: string, timezone: string): Date {
   if (!dateStr.includes("T")) {
@@ -36,6 +36,7 @@ export interface HabitWithCounts extends Habit {
   week_progress: number | null;
   today_completion_id: string | null;
   completions_by_date?: string[];
+  skipped_dates?: string[];
 }
 
 export interface ProcessedHabit extends HabitWithCounts {
@@ -106,7 +107,7 @@ export function daysUntilWeekEnd(today: Date, weekEnd: Date): number {
 }
 
 /** Returns whether this habit should be done on the given day. */
-function isHabitScheduledForDay(habit: Habit, day: Date): boolean {
+export function isHabitScheduledForDay(habit: Habit, day: Date): boolean {
   switch (habit.frequency) {
     case "daily":
       return true;
@@ -170,6 +171,10 @@ export function shouldShowHabit(
   const completedToday = Number(habit.completed_today);
   const daysLeft = daysUntilWeekEnd(today, weekEnd);
   const remaining = Math.max(0, target - completions);
+
+  if (habit.is_skipped) {
+    return { ...habit, state: "skipped", show: false, target, remaining, daysLeftInWeek: daysLeft };
+  }
 
   // If the habit has a progress target, check progress-based completion
   const isProgressDone =

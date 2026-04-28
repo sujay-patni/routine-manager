@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { AppEvent } from "@/lib/notion/types";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface EventDetailSheetProps {
   event: AppEvent | null;
@@ -58,15 +58,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 }
 
 export default function EventDetailSheet({ event, open, onOpenChange, onEdit }: EventDetailSheetProps) {
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   if (!event) return null;
 

@@ -6,6 +6,8 @@ export type HabitFrequency =
   | "specific_dates_monthly"
   | "specific_dates_yearly";
 export type ProgressPeriod = "daily" | "weekly" | "monthly" | "yearly";
+export type SkipScope = "day" | "week";
+export type SkipItemType = "habit" | "event";
 
 export interface Habit {
   id: string;
@@ -22,12 +24,20 @@ export interface Habit {
   exact_time: string | null;      // "HH:MM"
   specific_days: string | null;   // "MO,WE,FR" | "1,15" | "01-15"
   // progress tracking
-  progress_metric: string | null; // e.g. "steps"
+  progress_metric: string | null; // unit name e.g. "steps", "mins", "hrs"
   progress_target: number | null; // e.g. 10000
   progress_start: number | null;  // e.g. 0
   progress_period: ProgressPeriod | null; // "daily" | "weekly" | "monthly" | "yearly"
+  progress_conversion: number | null; // minutes per unit (right/left); null = 1
+  progress_conversion_base: number | null; // the left-side quantity (e.g. 1000 for "1000 steps = 10 mins")
+  // duration
+  duration_minutes: number | null; // default expected time per completion (minutes)
   // display
   sort_order: number | null;
+  group_id: string | null;
+  skip_id?: string | null;
+  is_skipped?: boolean;
+  skip_scope?: SkipScope | null;
 }
 
 export interface Completion {
@@ -36,6 +46,7 @@ export interface Completion {
   date: string;       // YYYY-MM-DD
   note: string | null;
   progress_value: number | null;
+  duration_actual: number | null; // actual time spent in minutes
 }
 
 export interface AppEvent {
@@ -53,6 +64,41 @@ export interface AppEvent {
   // scheduling
   time_of_day: TimeOfDay | null;
   due_time: string | null;       // "HH:MM" for tasks/deadlines
+  group_id: string | null;
+  // duration
+  duration_minutes: number | null; // default expected time (minutes)
+  duration_actual: number | null;  // actual time logged at completion (minutes)
+  skip_id?: string | null;
+  is_skipped?: boolean;
+  skip_scope?: SkipScope | null;
+}
+
+export interface SkipRecord {
+  id: string;
+  item_type: SkipItemType;
+  item_id: string;
+  scope: SkipScope;
+  date: string | null;
+  week_start: string | null;
+  week_end: string | null;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number | null;
+}
+
+export interface Vacation {
+  id: string;
+  name: string;
+  is_template: boolean;
+  start_date: string | null;  // YYYY-MM-DD; null for templates
+  end_date: string | null;    // YYYY-MM-DD; null for templates
+  habit_ids: string[];
+  group_ids: string[];
+  note: string | null;
 }
 
 export interface AppSettings {
@@ -61,4 +107,5 @@ export interface AppSettings {
   week_start_day: number;
   deadline_surface_days: number;
   day_start_hour: number; // 0–23; habits don't reset until this hour (0 = midnight)
+  progress_units: string[]; // available units for progress tracking (always includes "mins","hrs")
 }

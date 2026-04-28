@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,11 +11,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { createHabit } from "@/app/actions/habits";
 import { createEvent } from "@/app/actions/events";
-import type { HabitFrequency } from "@/lib/notion/types";
+import type { HabitFrequency, Group } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
+import { useSettings } from "@/components/SettingsProvider";
+import { useIsMobile } from "@/lib/useMediaQuery";
+
+function isTimeUnit(unit: string) {
+  return unit === "mins" || unit === "hrs";
+}
 
 const DAYS_OF_WEEK = [
   { abbr: "MO", label: "Mon" },
@@ -67,6 +73,7 @@ interface AddItemSheetProps {
   defaultDate?: string; // YYYY-MM-DD — pre-fills date fields
   dispatchHabit?: (action: OptimisticAction<ProcessedHabit>) => void;
   dispatchEvent?: (action: OptimisticAction<TodayEvent>) => void;
+  groups?: Group[];
 }
 
 // toISOString() is always UTC — use Intl.DateTimeFormat to get the
@@ -75,25 +82,22 @@ function todayISO() {
   return new Intl.DateTimeFormat("en-CA").format(new Date()); // "en-CA" gives YYYY-MM-DD
 }
 
-export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit", defaultDate, dispatchHabit, dispatchEvent }: AddItemSheetProps) {
+function addMinutesToISO(iso: string, minutes: number): string {
+  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+}
+
+export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit", defaultDate, dispatchHabit, dispatchEvent, groups = [] }: AddItemSheetProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
+  const settings = useSettings();
 
   // — Habit state —
   const [habitName, setHabitName] = useState("");
   const [habitDesc, setHabitDesc] = useState("");
   const [habitFreq, setHabitFreq] = useState<HabitFrequency>("daily");
-  const [habitTarget, setHabitTarget] = useState(3);
+  const [habitTarget, setHabitTarget] = useState("3");
   const [habitTimeOfDay, setHabitTimeOfDay] = useState("");
   const [habitExactTime, setHabitExactTime] = useState("");
   const [habitShowExact, setHabitShowExact] = useState(false);
@@ -104,7 +108,10 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     { month: "01", day: "01" },
   ]);
   const [habitProgressOn, setHabitProgressOn] = useState(false);
-  const [habitMetric, setHabitMetric] = useState("");
+  const [habitMetric, setHabitMetric] = useState("mins");
+  const [habitConvLeft, setHabitConvLeft] = useState("1");
+  const [habitConvRight, setHabitConvRight] = useState("1");
+  const [habitDuration, setHabitDuration] = useState("");
   const [habitTarget2, setHabitTarget2] = useState("");
   const [habitStart, setHabitStart] = useState("0");
   const [habitProgressPeriod, setHabitProgressPeriod] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
@@ -114,7 +121,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [eventDesc, setEventDesc] = useState("");
   const [eventDate, setEventDate] = useState(todayISO);
   const [eventTime, setEventTime] = useState("09:00");
-  const [eventEndTime, setEventEndTime] = useState("");
+  const [eventDuration, setEventDuration] = useState("");
   const [dueDate, setDueDate] = useState(todayISO);
   const [dueTime, setDueTime] = useState("");
   const [surfaceDays, setSurfaceDays] = useState(3);
@@ -122,9 +129,17 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [eventDays, setEventDays] = useState<string[]>([]);
   const [eventTimeOfDay, setEventTimeOfDay] = useState("");
   const [eventShowExact, setEventShowExact] = useState(false);
+  const [groupId, setGroupId] = useState("");
 
   function baseDate() {
     return defaultDate ?? todayISO();
+  }
+
+  function normalizeWeeklyTarget(value: string) {
+    let parsed = parseInt(value, 10);
+    if (isNaN(parsed) || parsed < 1) parsed = 1;
+    if (parsed > 7) parsed = 7;
+    return parsed;
   }
 
   const [prevDefaultDate, setPrevDefaultDate] = useState(defaultDate);
@@ -137,16 +152,18 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   }
 
   function resetForms() {
-    setHabitName(""); setHabitDesc(""); setHabitFreq("daily"); setHabitTarget(3);
+    setHabitName(""); setHabitDesc(""); setHabitFreq("daily"); setHabitTarget("3");
     setHabitTimeOfDay(""); setHabitExactTime(""); setHabitShowExact(false);
     setHabitDays([]); setHabitDates([]);
     setHabitYearlyDates([{ month: "01", day: "01" }]);
-    setHabitProgressOn(false); setHabitMetric(""); setHabitTarget2(""); setHabitStart("0");
+    setHabitProgressOn(false); setHabitMetric("mins"); setHabitConvLeft("1"); setHabitConvRight("1"); setHabitDuration("");
+    setHabitTarget2(""); setHabitStart("0");
     setHabitProgressPeriod("daily");
     setEventTitle(""); setEventDesc(""); setEventDate(baseDate()); setEventTime("09:00");
-    setEventEndTime(""); setDueDate(baseDate()); setDueTime("");
+    setEventDuration(""); setDueDate(baseDate()); setDueTime("");
     setSurfaceDays(3); setRecurrence("none"); setEventDays([]);
     setEventTimeOfDay(""); setEventShowExact(false);
+    setGroupId("");
     setError(null);
     setWarning(null);
   }
@@ -214,11 +231,16 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     e.preventDefault();
     if (!habitName.trim()) return;
     setError(null);
+    setWarning(null);
+    const convLeft = Number(habitConvLeft) || 1;
+    const convRight = Number(habitConvRight) || 1;
+    const conversionVal = habitProgressOn && !isTimeUnit(habitMetric) ? convRight / convLeft : undefined;
+    const weeklyTarget = normalizeWeeklyTarget(habitTarget);
     const payload = {
       name: habitName.trim(),
       description: habitDesc || undefined,
       frequency: habitFreq,
-      weekly_target: habitFreq === "weekly" && !habitProgressOn ? habitTarget : undefined,
+      weekly_target: habitFreq === "weekly" && !habitProgressOn ? weeklyTarget : undefined,
       time_of_day: habitShowExact ? undefined : habitTimeOfDay || undefined,
       exact_time: habitShowExact ? habitExactTime || undefined : undefined,
       specific_days: getHabitSpecificDays(),
@@ -226,9 +248,19 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       progress_target: habitProgressOn && habitTarget2 ? Number(habitTarget2) : undefined,
       progress_start: habitProgressOn ? Number(habitStart) : undefined,
       progress_period: habitProgressOn ? habitProgressPeriod : undefined,
+      progress_conversion: conversionVal && !isNaN(conversionVal) ? conversionVal : undefined,
+      progress_conversion_base: habitProgressOn && !isTimeUnit(habitMetric) ? convLeft : undefined,
+      duration_minutes: habitDuration ? Number(habitDuration) : undefined,
+      group_id: groupId || null,
     };
-    
+
     startTransition(async () => {
+      const result = await createHabit(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchHabit) {
         dispatchHabit({
           action: "add",
@@ -246,6 +278,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
             week_progress: null,
             today_completion_id: null,
             sort_order: null,
+            group_id: groupId || null,
             target: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
             remaining: payload.frequency === "daily" ? 7 : (payload.weekly_target || 1),
             daysLeftInWeek: 7,
@@ -254,20 +287,26 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
           } as ProcessedHabit
         });
       }
-      const result = await createHabit(payload);
-      if (result.error) console.error("Error creating habit:", result.error);
-    });
 
-    resetForms();
-    onOpenChange(false);
+      if (result.warning) {
+        resetForms();
+        setWarning(result.warning);
+        return;
+      }
+
+      resetForms();
+      onOpenChange(false);
+    });
   }
 
   function handleTimedEventSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
     setError(null);
+    setWarning(null);
     const startISO = new Date(`${eventDate}T${eventTime}:00`).toISOString();
-    const endISO = eventEndTime ? new Date(`${eventDate}T${eventEndTime}:00`).toISOString() : undefined;
+    const durationMinutes = eventDuration ? Number(eventDuration) : undefined;
+    const endISO = durationMinutes ? addMinutesToISO(startISO, durationMinutes) : undefined;
     const rrule = buildRRule(recurrence, eventDays);
     const payload = {
       title: eventTitle.trim(),
@@ -277,27 +316,33 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       end_time: endISO,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
+      duration_minutes: durationMinutes,
+      group_id: groupId || null,
     };
 
     startTransition(async () => {
+      const result = await createEvent(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchEvent) {
         dispatchEvent({
           action: "add",
           item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
         });
       }
-      const result = await createEvent(payload);
-      if (result.error) console.error("Error creating bounded event:", result.error);
+      resetForms();
+      onOpenChange(false);
     });
-
-    resetForms();
-    onOpenChange(false);
   }
 
   function handleAllDaySubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
     setError(null);
+    setWarning(null);
     const rrule = buildRRule(recurrence, eventDays);
     const payload = {
       title: eventTitle.trim(),
@@ -306,27 +351,33 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       due_date: dueDate,
       is_recurring: recurrence !== "none",
       recurrence_rule: rrule,
+      duration_minutes: eventDuration ? Number(eventDuration) : undefined,
+      group_id: groupId || null,
     };
 
     startTransition(async () => {
+      const result = await createEvent(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchEvent) {
         dispatchEvent({
           action: "add",
           item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
         });
       }
-      const result = await createEvent(payload);
-      if (result.error) console.error("Error creating all-day event:", result.error);
+      resetForms();
+      onOpenChange(false);
     });
-
-    resetForms();
-    onOpenChange(false);
   }
 
   function handleDeadlineSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle.trim()) return;
     setError(null);
+    setWarning(null);
     
     const payload = {
       title: eventTitle.trim(),
@@ -335,21 +386,26 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       due_date: dueDate,
       due_time: dueTime || undefined,
       surface_days: Number(surfaceDays),
+      duration_minutes: eventDuration ? Number(eventDuration) : undefined,
+      group_id: groupId || null,
     };
 
     startTransition(async () => {
+      const result = await createEvent(payload);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
       if (dispatchEvent) {
         dispatchEvent({
           action: "add",
           item: { ...payload, id: "temp-event-" + Date.now(), is_completed: false } as TodayEvent
         });
       }
-      const result = await createEvent(payload);
-      if (result.error) console.error("Error creating deadline:", result.error);
+      resetForms();
+      onOpenChange(false);
     });
-
-    resetForms();
-    onOpenChange(false);
   }
 
   const handleOpenChange = (o: boolean) => { if (!o) resetForms(); onOpenChange(o); };
@@ -428,9 +484,43 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                         </div>
                         <div className="col-span-1 space-y-1">
                           <Label className="text-xs">Unit</Label>
-                          <Input value={habitMetric} onChange={e => setHabitMetric(e.target.value)} placeholder="steps" />
+                          <Select value={habitMetric} onValueChange={v => { if (v) { setHabitMetric(v); setHabitConvLeft("1"); setHabitConvRight("1"); } }}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {(settings.progress_units ?? ["mins", "hrs"]).map(u => (
+                                <SelectItem key={u} value={u}>{u}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
+                      {!isTimeUnit(habitMetric) && (
+                        <div className="space-y-1">
+                          <Label className="text-xs">Conversion</Label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={0.01}
+                              step={0.01}
+                              value={habitConvLeft}
+                              onChange={e => setHabitConvLeft(e.target.value)}
+                              placeholder="1"
+                              className="w-16"
+                            />
+                            <span className="text-xs text-muted-foreground">{habitMetric || "unit"} =</span>
+                            <Input
+                              type="number"
+                              min={0.01}
+                              step={0.01}
+                              value={habitConvRight}
+                              onChange={e => setHabitConvRight(e.target.value)}
+                              placeholder="1"
+                              className="w-16"
+                            />
+                            <span className="text-xs text-muted-foreground">min</span>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-1">
                         <Label className="text-xs">Progress resets</Label>
                         <Select value={habitProgressPeriod} onValueChange={v => v && setHabitProgressPeriod(v as typeof habitProgressPeriod)}>
@@ -474,12 +564,8 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                       min={1}
                       max={7}
                       value={habitTarget}
-                      onChange={e => {
-                        let val = parseInt(e.target.value, 10);
-                        if (isNaN(val) || val < 1) val = 1;
-                        if (val > 7) val = 7;
-                        setHabitTarget(val);
-                      }}
+                      onChange={e => setHabitTarget(e.target.value)}
+                      onBlur={() => setHabitTarget(String(normalizeWeeklyTarget(habitTarget)))}
                     />
                   </div>
                 )}
@@ -612,10 +698,47 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   )}
                 </div>
 
+                {!habitProgressOn && (
+                  <div className="space-y-2">
+                    <Label>Default duration (min)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={habitDuration}
+                      onChange={e => setHabitDuration(e.target.value)}
+                      placeholder="e.g. 30"
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <Textarea placeholder="Any notes…" value={habitDesc} onChange={e => setHabitDesc(e.target.value)} rows={2} />
                 </div>
+
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Habit"}
@@ -639,10 +762,6 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                     <Label>Start time</Label>
                     <Input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)} required />
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>End time</Label>
-                  <Input type="time" value={eventEndTime} onChange={e => setEventEndTime(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label>Repeat</Label>
@@ -682,9 +801,36 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                 </div>
 
                 <div className="space-y-2">
+                  <Label>Duration (min)</Label>
+                  <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 60" />
+                </div>
+                <div className="space-y-2">
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Event"}
                 </Button>
@@ -764,9 +910,36 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                 </div>
 
                 <div className="space-y-2">
+                  <Label>Default duration (min)</Label>
+                  <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 30" />
+                </div>
+                <div className="space-y-2">
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Task"}
                 </Button>
@@ -818,9 +991,36 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                   </Select>
                 </div>
                 <div className="space-y-2">
+                  <Label>Default duration (min)</Label>
+                  <Input type="number" min={1} value={eventDuration} onChange={e => setEventDuration(e.target.value)} placeholder="e.g. 60" />
+                </div>
+                <div className="space-y-2">
                   <Label>Notes</Label>
                   <Textarea placeholder="Any details…" value={eventDesc} onChange={e => setEventDesc(e.target.value)} rows={2} />
                 </div>
+                {groups.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Group</Label>
+                    <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                      <SelectTrigger>
+                          <SelectValue>
+                            {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                          </SelectValue>
+                        </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                              {g.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={isPending}>
                   {isPending ? "Adding…" : "Add Deadline"}
                 </Button>

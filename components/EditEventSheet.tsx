@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,14 +10,16 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/notion/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface EditEventSheetProps {
   event: AppEvent | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dispatchEvent?: (action: OptimisticAction<TodayEvent>) => void;
+  groups?: Group[];
 }
 
 const SURFACE_OPTIONS = [
@@ -50,29 +52,33 @@ function isoTimePart(isoStr: string | null | undefined): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-export default function EditEventSheet({ event, open, onOpenChange, dispatchEvent }: EditEventSheetProps) {
+function durationFromRange(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start || !end) return "";
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return "";
+  return String(Math.round((endMs - startMs) / 60_000));
+}
+
+function addMinutesToISO(iso: string, minutes: number): string {
+  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+}
+
+export default function EditEventSheet({ event, open, onOpenChange, dispatchEvent, groups = [] }: EditEventSheetProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [deleteMode, setDeleteMode] = useState<"none" | "confirm_single" | "prompt_recurring">("none");
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   // Shared fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [duration, setDuration] = useState(event?.duration_minutes != null ? String(event.duration_minutes) : "");
 
   // Timed-specific
   const [eventDate, setEventDate] = useState("");
   const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
 
   // All-day-specific
   const [taskDate, setTaskDate] = useState("");
@@ -84,17 +90,27 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
   const [deadlineTime, setDeadlineTime] = useState("");
   const [surfaceDays, setSurfaceDays] = useState("3");
 
+  // Group
+  const [groupId, setGroupId] = useState(event?.group_id ?? "");
+
   function resetToEvent(e: AppEvent | null) {
     if (!e) return;
     setTitle(e.title);
     setDescription(e.description ?? "");
+    setDuration(
+      e.duration_minutes != null
+        ? String(e.duration_minutes)
+        : e.event_type === "timed"
+          ? durationFromRange(e.start_time, e.end_time)
+          : ""
+    );
+    setGroupId(e.group_id ?? "");
     setError(null);
     setDeleteMode("none");
 
     if (e.event_type === "timed") {
       setEventDate(isoDatePart(e.start_time));
       setStartTime(isoTimePart(e.start_time));
-      setEndTime(isoTimePart(e.end_time));
     } else if (e.event_type === "all_day") {
       setTaskDate(e.due_date ?? "");
       setTimeOfDay(e.time_of_day ?? "");
@@ -120,12 +136,15 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
     const data: Parameters<typeof updateEvent>[1] = {
       title,
       description: description || undefined,
+      duration_minutes: duration ? Number(duration) : null,
+      group_id: groupId || null,
     };
 
     if (event.event_type === "timed") {
       const dateStr = eventDate || isoDatePart(event.start_time);
-      data.start_time = startTime ? new Date(`${dateStr}T${startTime}:00`).toISOString() : null;
-      data.end_time = endTime ? new Date(`${dateStr}T${endTime}:00`).toISOString() : null;
+      const startISO = startTime ? new Date(`${dateStr}T${startTime}:00`).toISOString() : null;
+      data.start_time = startISO;
+      data.end_time = startISO && duration ? addMinutesToISO(startISO, Number(duration)) : null;
     } else if (event.event_type === "all_day") {
       data.due_date = taskDate || null;
       data.time_of_day = timeOfDay || null;
@@ -232,8 +251,8 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
                   <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>End time <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                  <Label>Duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 60" />
                 </div>
               </div>
             </>
@@ -292,6 +311,44 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
                 </Select>
               </div>
             </>
+          )}
+
+          {/* Duration */}
+          {event?.event_type !== "timed" && (
+            <div className="space-y-2">
+              <Label>Default duration (min) <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                type="number"
+                min={1}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                placeholder="e.g. 60"
+              />
+            </div>
+          )}
+
+          {groups.length > 0 && (
+            <div className="space-y-2">
+              <Label>Group</Label>
+              <Select value={groupId} onValueChange={(v) => setGroupId(v ?? "")}>
+                <SelectTrigger>
+                  <SelectValue>
+                    {groupId ? (groups.find((g) => g.id === groupId)?.name ?? groupId) : "None"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  {groups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                        {g.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
 
           <Button type="submit" className="w-full" disabled={isPending}>

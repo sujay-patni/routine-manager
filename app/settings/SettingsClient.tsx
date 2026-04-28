@@ -1,18 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { updateHabit, getAllHabits, reorderHabits } from "@/app/actions/habits";
 import { saveSettings } from "@/app/actions/settings";
-import AddItemSheet from "@/components/AddItemSheet";
-import EditHabitSheet from "@/components/EditHabitSheet";
 import { useSettings } from "@/components/SettingsProvider";
-import type { Habit } from "@/lib/notion/types";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
 
@@ -39,60 +35,15 @@ const COMMON_TIMEZONES = [
   "Pacific/Honolulu",
 ];
 
-type SectionKey = "morning" | "afternoon" | "evening" | "night" | "all_day";
-
-const SECTION_LABELS: Record<SectionKey, string> = {
-  morning: "🌅 Morning",
-  afternoon: "☀️ Afternoon",
-  evening: "🌆 Evening",
-  night: "🌙 Night",
-  all_day: "🗓 All Day",
-};
-
-const SECTION_ORDER: SectionKey[] = ["morning", "afternoon", "evening", "night", "all_day"];
-
-function getHabitSection(habit: Habit): SectionKey {
-  if (habit.time_of_day) return habit.time_of_day as SectionKey;
-  if (habit.exact_time) {
-    const h = parseInt(habit.exact_time.split(":")[0], 10);
-    if (h >= 4 && h < 12) return "morning";
-    if (h >= 12 && h < 16) return "afternoon";
-    if (h >= 16 && h < 20) return "evening";
-    return "night";
-  }
-  return "all_day";
-}
-
 interface Props {
-  habits: Habit[];
   notionHabitsUrl?: string;
   notionEventsUrl?: string;
+  notionSettingsConfigured?: boolean;
 }
 
-export default function SettingsClient({ habits: initialHabits, notionHabitsUrl, notionEventsUrl }: Props) {
+export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notionSettingsConfigured }: Props) {
   const settings = useSettings();
   const router = useRouter();
-  const [, startTransition] = useTransition();
-  const [addHabitOpen, setAddHabitOpen] = useState(false);
-  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
-  const [habits, setHabits] = useState(initialHabits);
-
-  // Ordered habit IDs per section (for client-side reordering)
-  const [sectionOrder, setSectionOrder] = useState<Record<SectionKey, string[]>>(() => {
-    const groups: Record<SectionKey, Habit[]> = {
-      morning: [], afternoon: [], evening: [], night: [], all_day: [],
-    };
-    for (const h of initialHabits) {
-      groups[getHabitSection(h)].push(h);
-    }
-    const result = {} as Record<SectionKey, string[]>;
-    for (const key of SECTION_ORDER) {
-      result[key] = groups[key]
-        .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))
-        .map(h => h.id);
-    }
-    return result;
-  });
 
   // Settings form state
   const [timezone, setTimezone] = useState(settings.timezone);
@@ -103,7 +54,12 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
   const [settingsSaved, setSettingsSaved] = useState(false);
   const { theme, setTheme } = useTheme();
 
-  const notionEnabled = settings.id !== "env";
+  // Progress units state
+  const [progressUnits, setProgressUnits] = useState(settings.progress_units ?? ["mins", "hrs"]);
+  const [newUnit, setNewUnit] = useState("");
+  const FIXED_UNITS = ["mins", "hrs"];
+
+  const notionEnabled = notionSettingsConfigured === true || settings.id !== "env";
 
   async function handleSaveSettings(e: React.FormEvent) {
     e.preventDefault();
@@ -113,6 +69,7 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
       week_start_day: Number(weekStart),
       deadline_surface_days: Number(surfaceDays),
       day_start_hour: Number(dayStartHour),
+      progress_units: progressUnits,
     });
     setSavingSettings(false);
     if (!result.error) {
@@ -122,61 +79,42 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
     }
   }
 
-  async function toggleHabitActive(habit: Habit) {
-    await updateHabit(habit.id, { is_active: !habit.is_active });
-    setHabits((prev) =>
-      prev.map((h) => (h.id === habit.id ? { ...h, is_active: !h.is_active } : h))
-    );
-    router.refresh();
+  function currentBaseSettings() {
+    return {
+      timezone,
+      week_start_day: Number(weekStart),
+      deadline_surface_days: Number(surfaceDays),
+      day_start_hour: Number(dayStartHour),
+    };
   }
 
-  async function handleHabitAdded() {
-    const updated = await getAllHabits();
-    setHabits(updated);
-    // Rebuild section order with new habits at the end of their section
-    setSectionOrder(prev => {
-      const existingIds = new Set(Object.values(prev).flat());
-      const newGroups = { ...prev };
-      for (const h of updated) {
-        if (!existingIds.has(h.id)) {
-          const sec = getHabitSection(h);
-          newGroups[sec] = [...newGroups[sec], h.id];
-        }
-      }
-      return newGroups;
-    });
-  }
-
-  async function handleHabitUpdated() {
-    const updated = await getAllHabits();
-    setHabits(updated);
-    const groups: Record<SectionKey, Habit[]> = { morning: [], afternoon: [], evening: [], night: [], all_day: [] };
-    for (const h of updated) groups[getHabitSection(h)].push(h);
-    const newOrder = {} as Record<SectionKey, string[]>;
-    for (const key of SECTION_ORDER) {
-      newOrder[key] = groups[key].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)).map(h => h.id);
+  async function addProgressUnit() {
+    const unit = newUnit.trim().toLowerCase();
+    if (!unit || progressUnits.includes(unit)) { setNewUnit(""); return; }
+    const updated = [...progressUnits, unit];
+    setProgressUnits(updated);
+    setNewUnit("");
+    const result = await saveSettings({ ...currentBaseSettings(), progress_units: updated });
+    if (result.error) {
+      console.error("Failed to save progress unit:", result.error);
+      setProgressUnits(progressUnits); // revert
+    } else {
+      router.refresh();
     }
-    setSectionOrder(newOrder);
   }
 
-  function moveHabit(sectionKey: SectionKey, index: number, direction: "up" | "down") {
-    const ids = sectionOrder[sectionKey];
-    const newIds = [...ids];
-    const swapIdx = direction === "up" ? index - 1 : index + 1;
-    if (swapIdx < 0 || swapIdx >= newIds.length) return;
-    [newIds[index], newIds[swapIdx]] = [newIds[swapIdx], newIds[index]];
-    setSectionOrder(prev => ({ ...prev, [sectionKey]: newIds }));
-    startTransition(async () => {
-      const result = await reorderHabits(newIds);
-      if (result.error) {
-        console.error("Failed to save order:", result.error);
-        // Revert optimistic update
-        setSectionOrder(prev => ({ ...prev, [sectionKey]: ids }));
-      }
-    });
+  async function removeProgressUnit(unit: string) {
+    if (FIXED_UNITS.includes(unit)) return;
+    const updated = progressUnits.filter(u => u !== unit);
+    setProgressUnits(updated);
+    const result = await saveSettings({ ...currentBaseSettings(), progress_units: updated });
+    if (result.error) {
+      console.error("Failed to remove progress unit:", result.error);
+      setProgressUnits(progressUnits); // revert
+    } else {
+      router.refresh();
+    }
   }
-
-  const habitById = new Map(habits.map(h => [h.id, h]));
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -313,101 +251,106 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
 
         <Separator />
 
+        {/* ─── Progress Units ─── */}
+        <section className="space-y-4">
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Progress Units</h2>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            Units used when tracking habit progress. <strong>mins</strong> and <strong>hrs</strong> are built-in time units — the progress value IS the time. Custom units can have a conversion rate set per-habit.
+          </p>
+          <div className="rounded-2xl border bg-card card-elevated p-4 space-y-4">
+            {!notionEnabled && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Custom units require <code className="bg-muted px-1 rounded">NOTION_SETTINGS_DB_ID</code> to persist across reloads.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {progressUnits.map(unit => (
+                <span
+                  key={unit}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border bg-muted"
+                >
+                  {unit}
+                  {notionEnabled && !FIXED_UNITS.includes(unit) && (
+                    <button
+                      type="button"
+                      onClick={() => removeProgressUnit(unit)}
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                      aria-label={`Remove ${unit}`}
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+            {notionEnabled && (
+              <form
+                onSubmit={(e) => { e.preventDefault(); addProgressUnit(); }}
+                className="flex gap-2"
+              >
+                <Input
+                  value={newUnit}
+                  onChange={e => setNewUnit(e.target.value)}
+                  placeholder="e.g. pages, reps, km"
+                  className="flex-1"
+                />
+                <Button type="submit" variant="outline" size="sm">Add</Button>
+              </form>
+            )}
+          </div>
+        </section>
+
+        <Separator />
+
         {/* ─── Habits ─── */}
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Habits</h2>
-            <Button size="sm" variant="outline" onClick={() => setAddHabitOpen(true)}>
-              + Add habit
-            </Button>
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Habits</h2>
+          <div
+            className="rounded-2xl border bg-card card-elevated p-4 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition-colors"
+            onClick={() => router.push("/settings/habits")}
+          >
+            <div>
+              <p className="font-semibold text-sm">Manage Habits</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Add, edit, pause, and reorder your routines</p>
+            </div>
+            <span className="text-sm text-primary font-medium">→</span>
           </div>
+        </section>
 
-          {habits.length === 0 && (
-            <p className="text-sm text-muted-foreground">No habits yet. Add your first one!</p>
-          )}
+        <Separator />
 
-          {SECTION_ORDER.map((sectionKey) => {
-            const ids = sectionOrder[sectionKey];
-            const sectionHabits = ids.map(id => habitById.get(id)).filter(Boolean) as Habit[];
-            if (sectionHabits.length === 0) return null;
+        {/* ─── Groups ─── */}
+        <section className="space-y-4">
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Groups</h2>
+          <div
+            className="rounded-2xl border bg-card card-elevated p-4 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition-colors"
+            onClick={() => router.push("/settings/groups")}
+          >
+            <div>
+              <p className="font-semibold text-sm">Manage Groups</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Organize habits and events by category</p>
+            </div>
+            <span className="text-sm text-primary font-medium">→</span>
+          </div>
+        </section>
 
-            return (
-              <div key={sectionKey} className="space-y-2">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  {SECTION_LABELS[sectionKey]}
-                </h3>
-                <div className="space-y-1">
-                  {sectionHabits.map((habit, idx) => (
-                    <div
-                      key={habit.id}
-                      className="flex items-center gap-2 p-3 rounded-2xl border bg-card card-elevated"
-                    >
-                      {/* Reorder buttons */}
-                      <div className="flex flex-col gap-0.5 flex-shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => moveHabit(sectionKey, idx, "up")}
-                          disabled={idx === 0}
-                          className="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                          aria-label="Move up"
-                        >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveHabit(sectionKey, idx, "down")}
-                          disabled={idx === sectionHabits.length - 1}
-                          className="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                          aria-label="Move down"
-                        >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      </div>
+        <Separator />
 
-                      {/* Habit info */}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{habit.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {habit.frequency === "daily"
-                            ? "Daily"
-                            : habit.frequency === "weekly"
-                            ? `${habit.weekly_target ?? 1}× per week`
-                            : habit.frequency === "specific_days_weekly"
-                            ? `${habit.specific_days ?? "custom"} weekly`
-                            : habit.frequency === "specific_dates_monthly"
-                            ? "Monthly"
-                            : "Yearly"}
-                          {habit.progress_metric ? ` · ${habit.progress_target} ${habit.progress_metric}` : ""}
-                          {!habit.is_active && " · paused"}
-                        </p>
-                      </div>
-
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setEditingHabit(habit)}
-                        className="text-xs flex-shrink-0"
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={habit.is_active ? "outline" : "secondary"}
-                        onClick={() => toggleHabitActive(habit)}
-                        className="text-xs flex-shrink-0"
-                      >
-                        {habit.is_active ? "Pause" : "Resume"}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+        {/* ─── Vacations ─── */}
+        <section className="space-y-4">
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Vacations</h2>
+          <div
+            className="rounded-2xl border bg-card card-elevated p-4 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition-colors"
+            onClick={() => router.push("/settings/vacations")}
+          >
+            <div>
+              <p className="font-semibold text-sm">Vacation mode</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Pause selected habits while you&apos;re away — save reusable presets</p>
+            </div>
+            <span className="text-sm text-primary font-medium">→</span>
+          </div>
         </section>
 
         <Separator />
@@ -456,21 +399,6 @@ export default function SettingsClient({ habits: initialHabits, notionHabitsUrl,
         </div>
 
       </main>
-
-      <AddItemSheet
-        open={addHabitOpen}
-        onOpenChange={(o) => {
-          setAddHabitOpen(o);
-          if (!o) handleHabitAdded();
-        }}
-        defaultTab="habit"
-      />
-      <EditHabitSheet
-        habit={editingHabit}
-        open={!!editingHabit}
-        onOpenChange={(o) => { if (!o) setEditingHabit(null); }}
-        onSaved={handleHabitUpdated}
-      />
     </div>
   );
 }

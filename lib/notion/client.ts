@@ -6,3 +6,6 @@ export const HABITS_DB = process.env.NOTION_HABITS_DB_ID!;
 export const COMPLETIONS_DB = process.env.NOTION_COMPLETIONS_DB_ID!;
 export const EVENTS_DB = process.env.NOTION_EVENTS_DB_ID!;
 export const SETTINGS_DB = process.env.NOTION_SETTINGS_DB_ID ?? "";
+export const SKIPS_DB = process.env.NOTION_SKIPS_DB_ID ?? "";
+export const GROUPS_DB = process.env.NOTION_GROUPS_DB_ID ?? "";
+export const VACATIONS_DB = process.env.NOTION_VACATIONS_DB_ID ?? "";
