@@ -1,8 +1,20 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { getCookieName, verifyCookie } from "@/lib/auth";
+import { isDeviceAllowed } from "@/lib/notion/devices";
 
 export default async function BlockedPage() {
   const cookieStore = await cookies();
   const deviceId = cookieStore.get("device_id")?.value;
+  const authCookie = cookieStore.get(getCookieName())?.value;
+
+  if (verifyCookie(authCookie)) {
+    redirect("/today");
+  }
+
+  if (deviceId && await isDeviceAllowed(deviceId)) {
+    redirect("/unlock");
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
