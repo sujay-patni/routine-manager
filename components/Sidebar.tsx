@@ -10,8 +10,14 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
+const HIDDEN_ON = ["/blocked", "/unlock"];
+
 export default function Sidebar() {
   const pathname = usePathname();
+
+  if (HIDDEN_ON.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return null;
+  }
 
   return (
     <aside className="hidden lg:flex flex-col fixed left-0 top-0 h-full w-56 border-r bg-sidebar z-40">

@@ -39,7 +39,7 @@ export async function proxy(request: NextRequest) {
     res.cookies.set(DEVICE_COOKIE, deviceId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax",
       maxAge: DEVICE_COOKIE_MAX_AGE,
       path: "/",
     });

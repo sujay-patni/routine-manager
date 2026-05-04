@@ -50,7 +50,7 @@ export async function validatePassphrase(
   cookieStore.set(getCookieName(), signCookie("authenticated"), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    sameSite: "lax",
     maxAge: getCookieMaxAge(),
     path: "/",
   });

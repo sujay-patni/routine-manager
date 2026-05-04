@@ -10,8 +10,14 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
+const HIDDEN_ON = ["/blocked", "/unlock"];
+
 export default function BottomNav() {
   const pathname = usePathname();
+
+  if (HIDDEN_ON.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return null;
+  }
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/92 backdrop-blur border-t safe-bottom">
