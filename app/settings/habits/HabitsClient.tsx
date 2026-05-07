@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { updateHabit, getAllHabits, reorderHabits } from "@/app/actions/habits";
 import AddItemSheet from "@/components/AddItemSheet";
@@ -144,6 +145,39 @@ export default function HabitsClient({ habits: initialHabits, groups }: Props) {
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-4 bottom-nav-offset lg:pb-8 max-w-2xl mx-auto w-full space-y-4">
+        <details className="rounded-2xl border bg-muted/40 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 select-none">
+            <Activity className="w-4 h-4 text-emerald-500" />
+            Sync from Health Connect (optional)
+          </summary>
+          <div className="text-sm text-muted-foreground mt-3 space-y-2 leading-relaxed">
+            <p>Auto-fill steps, sleep, distance, or active calories from your Android phone&apos;s Health Connect.</p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>
+                In your Notion Habits DB, set <code className="text-xs">Health Source</code> on the habit
+                {" "}(one of <code className="text-xs">steps</code>, <code className="text-xs">sleep_minutes</code>,
+                {" "}<code className="text-xs">distance_meters</code>, <code className="text-xs">active_calories</code>).
+              </li>
+              <li>Make sure <code className="text-xs">Progress Metric</code>, <code className="text-xs">Progress Target</code>, and <code className="text-xs">Progress Period</code> are set on the habit.</li>
+              <li>
+                Install the{" "}
+                <a
+                  href="https://github.com/sujay-patni/health-connect-webhook/releases"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  HC Webhook fork APK
+                </a>{" "}
+                on your phone.
+              </li>
+              <li>Configure its webhook with your deployment URL + bearer secret.</li>
+            </ol>
+            <p>
+              Habits below show <Activity className="w-3 h-3 text-emerald-500 inline-block align-middle" /> when they&apos;re auto-synced.
+            </p>
+          </div>
+        </details>
         <div className="flex items-center justify-between">
           <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Manage Habits</h2>
           <Button size="sm" variant="outline" onClick={() => setAddHabitOpen(true)}>
@@ -205,6 +239,11 @@ export default function HabitsClient({ habits: initialHabits, groups }: Props) {
                           ) : null;
                         })()}
                         {habit.name}
+                        {habit.health_source && (
+                          <span title={`Auto-synced from Health Connect (${habit.health_source})`} className="flex-shrink-0">
+                            <Activity className="w-3.5 h-3.5 text-emerald-500" />
+                          </span>
+                        )}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {habit.frequency === "daily"

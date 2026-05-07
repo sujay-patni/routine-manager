@@ -206,6 +206,9 @@ NOTION_VACATIONS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 APP_PASSPHRASE=choose-a-private-passphrase
 COOKIE_SECRET=generate-a-long-random-secret
 
+# Optional — required only if you use the Health Connect webhook
+HEALTH_WEBHOOK_SECRET=generate-another-long-random-secret
+
 # Used only when NOTION_SETTINGS_DB_ID is missing
 TIMEZONE=Asia/Kolkata
 WEEK_START_DAY=1
@@ -264,6 +267,7 @@ Required environment variable: `NOTION_HABITS_DB_ID`
 | `Duration` | Number | Default expected minutes |
 | `Sort Order` | Number | Used for manual ordering |
 | `Group` | Relation | Relation to Groups database |
+| `Health Source` | Select | Optional. `steps`, `sleep_minutes`, `distance_meters`, or `active_calories`. Auto-fills the habit's Completions from a Health Connect webhook. Leave unset for manual habits. |
 
 ### Completions Database
 
@@ -401,6 +405,74 @@ Routine uses a simple passphrase gate:
 - Failed attempts are rate-limited in memory.
 
 This is designed for a private personal app, not multi-user account management.
+
+## Health Connect Sync (Optional)
+
+Routine has no native access to Health Connect — Health Connect is an Android-only API with no web SDK. Instead, the app exposes a webhook receiver that a phone-side bridge app can post to. Synced data is written into the habit's normal Completions, so progress bars on Today auto-fill the same way they would for manual logging.
+
+### Sender app
+
+Use the [**sujay-patni/health-connect-webhook**](https://github.com/sujay-patni/health-connect-webhook) Android app — a fork of [mcnaveen's HC Webhook](https://github.com/mcnaveen/health-connect-webhook) with Routine-friendly sync behavior: **steps are sent as raw per-record entries** (each `StepsRecord` from the phone pedometer, usually small bursts across the day) instead of a single calendar-day aggregate, and interval sync can resend the full recent window.
+
+Why the fork: the receiver attributes every record to a logical day using `Day Start Hour`. With the upstream aggregate, the 00:00–04:00 portion of each calendar day can't be split off, so it's mis-attributed when `Day Start Hour > 0`. With per-record data, each record carries its own precise `start_time` and is bucketed correctly. Routine overwrites the day's Completion on every sync, so interval sync should resend a complete recent window instead of only the delta since the previous sync.
+
+Grab the latest signed-debug APK directly from the fork's [GitHub Releases page](https://github.com/sujay-patni/health-connect-webhook/releases) — the `app-foss-debug.apk` asset attached to each release is what you sideload.
+
+### Setup
+
+1. Add a `Health Source` Select property to your Habits database with options `none`, `steps`, `sleep_minutes`, `distance_meters`, `active_calories`. Set a default of `none` if you want new habits to opt out by default.
+2. Set the property on each habit you want auto-fed. For example, a `Daily steps` habit with `Progress Metric=steps` and `Progress Target=10000` would have `Health Source=steps`.
+3. Set `HEALTH_WEBHOOK_SECRET` to a long random string in your environment (`openssl rand -base64 32`).
+4. Install the [fork's APK](https://github.com/sujay-patni/health-connect-webhook/releases) on your phone, grant it Health Connect read permission for the data types you want.
+5. In the app, add a webhook with:
+   - URL: `https://<your-deployment>/api/health/webhook`
+   - Header: `Authorization: Bearer <HEALTH_WEBHOOK_SECRET>`
+   - Sync interval: 1 hour works well; minimum is 15 min on Android.
+   - Interval option: enable `Send full 48-hour window` so Routine can recalculate today's total from the complete recent Health Connect records.
+
+### Behavior
+
+- Data is bucketed by your `Day Start Hour` setting. With `Day Start Hour=4`, a step record with `start_time=02:00 May 8` counts toward logical May 7. Sleep is attributed to the day the session ended (sleep ending Tuesday morning counts for Tuesday).
+- The webhook is **idempotent**: repeated syncs for the same day overwrite the existing Completion rather than creating duplicates. Multiple records on the same logical day are summed in-memory before a single upsert.
+- Habits with `Health Source` unset (or `none`) are unaffected.
+- The route returns `{ ok, upserted, unmapped, supportedInputCount }`. `unmapped` counts normalized records whose data type isn't wired to any active habit. Add `?debug=1` to the webhook URL while testing with curl/Postman to include sanitized receiver diagnostics in the JSON response.
+
+### Payload API
+
+Routine consumes this subset of the sender payload and ignores unsupported health arrays:
+
+```json
+{
+  "timestamp": "2026-05-07T18:30:00Z",
+  "app_version": "1.8.3",
+  "sync": {
+    "trigger": "interval",
+    "explicit_range": false,
+    "interval_full_lookback": true,
+    "used_last_sync_filter": false
+  },
+  "steps": [
+    { "count": 312, "start_time": "2026-05-07T10:00:00Z", "end_time": "2026-05-07T10:05:00Z" }
+  ],
+  "sleep": [
+    { "session_end_time": "2026-05-07T01:30:00Z", "duration_seconds": 28140 }
+  ],
+  "distance": [
+    { "meters": 520.4, "start_time": "2026-05-07T10:00:00Z", "end_time": "2026-05-07T10:15:00Z" }
+  ],
+  "active_calories": [
+    { "calories": 42.5, "start_time": "2026-05-07T10:00:00Z", "end_time": "2026-05-07T10:15:00Z" }
+  ]
+}
+```
+
+### Debug logging
+
+Set `HEALTH_WEBHOOK_DEBUG=1` in `.env.local` and restart the dev server. Each incoming POST logs sanitized counts and normalized upsert summaries as `[health-webhook] ...`. For a one-off local test with curl/Postman, append `?debug=1` to the webhook URL to include the same sanitized diagnostics in the HTTP response body.
+
+### Disabling
+
+Unset `HEALTH_WEBHOOK_SECRET` to reject all webhook requests with `401`. Removing the `Health Source` value from a habit (or setting it to `none`) is enough to stop auto-syncing that one without affecting others.
 
 ## Useful Commands
 

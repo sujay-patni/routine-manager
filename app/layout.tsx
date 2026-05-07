@@ -3,6 +3,7 @@ import { Geist, Fraunces } from "next/font/google";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import Sidebar from "@/components/Sidebar";
+import MainContent from "@/components/MainContent";
 import { SettingsProvider } from "@/components/SettingsProvider";
 import { getSettings } from "@/app/actions/settings";
 
@@ -57,10 +58,7 @@ export default async function RootLayout({
       <body className="min-h-full flex bg-background">
         <SettingsProvider settings={settings}>
           <Sidebar />
-          {/* Main content — offset on desktop to clear sidebar */}
-          <div className="flex flex-col flex-1 min-w-0 lg:pl-56">
-            {children}
-          </div>
+          <MainContent>{children}</MainContent>
           <BottomNav />
         </SettingsProvider>
       </body>

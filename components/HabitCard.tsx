@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition, useState, useRef } from "react";
+import { Activity } from "lucide-react";
 import { completeHabit, uncompleteHabit, logHabitProgress } from "@/app/actions/habits";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import { Badge } from "@/components/ui/badge";
@@ -272,6 +273,11 @@ export default function HabitCard({ habit, today, groups, onDoneChange, onToggle
               {timeLabel && <span className="text-xs text-muted-foreground">· {timeLabel}</span>}
               {!hasProgress && habit.duration_minutes != null && (
                 <span className="text-xs text-muted-foreground">· ~{habit.duration_minutes}m</span>
+              )}
+              {habit.health_source && (
+                <span title={`Auto-synced from Health Connect (${habit.health_source})`} className="inline-flex">
+                  <Activity className="w-3 h-3 text-emerald-500" />
+                </span>
               )}
             </div>
             {weeklyProgress && (

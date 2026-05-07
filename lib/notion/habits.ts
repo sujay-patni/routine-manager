@@ -1,6 +1,12 @@
 import { notion, HABITS_DB, COMPLETIONS_DB } from "./client";
 import { getText, getSelect, getCheckbox, getDate, getRelationIds } from "./helpers";
-import type { Habit, Completion, HabitFrequency, TimeOfDay, ProgressPeriod } from "./types";
+import type { Habit, Completion, HabitFrequency, TimeOfDay, ProgressPeriod, HealthSource } from "./types";
+
+const HEALTH_SOURCE_VALUES: HealthSource[] = ["steps", "sleep_minutes", "distance_meters", "active_calories"];
+
+function parseHealthSource(value: string): HealthSource | null {
+  return (HEALTH_SOURCE_VALUES as string[]).includes(value) ? (value as HealthSource) : null;
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -28,6 +34,7 @@ function pageToHabit(page: any): Habit {
     duration_minutes: props["Duration"]?.number ?? null,
     sort_order: props["Sort Order"]?.number ?? null,
     group_id: getRelationIds(props["Group"])[0] ?? null,
+    health_source: parseHealthSource(getSelect(props["Health Source"])),
   };
 }
 
@@ -253,6 +260,25 @@ export async function updateCompletionProgress(
   }
 }
 
+/** Find-or-create a completion for (habitId, date). If one already exists, its
+ *  progress_value (and duration_actual, when provided) are overwritten — the
+ *  webhook is the authoritative source for synced data. */
+export async function upsertCompletion(
+  habitId: string,
+  date: string,
+  habitName: string,
+  progressValue: number,
+  durationActual?: number
+): Promise<{ created: boolean; id: string }> {
+  const existing = await findCompletion(habitId, date);
+  if (existing) {
+    await updateCompletionProgress(existing.id, progressValue, durationActual);
+    return { created: false, id: existing.id };
+  }
+  const created = await createCompletion(habitId, date, habitName, progressValue, durationActual);
+  return { created: true, id: created.id };
+}
+
 export async function findAndDeleteCompletion(habitId: string, date: string): Promise<void> {
   const response = await notion.dataSources.query({
     data_source_id: COMPLETIONS_DB,
@@ -299,6 +325,7 @@ export async function createHabit(data: {
     Color: { select: { name: data.color ?? "#6366f1" } },
     Icon: { rich_text: [{ text: { content: data.icon ?? "" } }] },
     Active: { checkbox: true },
+    "Health Source": { select: { name: "none" } },
   };
 
   if (data.time_of_day) props["Time of Day"] = { select: { name: data.time_of_day } };

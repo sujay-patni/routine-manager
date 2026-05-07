@@ -8,6 +8,7 @@ export type HabitFrequency =
 export type ProgressPeriod = "daily" | "weekly" | "monthly" | "yearly";
 export type SkipScope = "day" | "week";
 export type SkipItemType = "habit" | "event";
+export type HealthSource = "steps" | "sleep_minutes" | "distance_meters" | "active_calories";
 
 export interface Habit {
   id: string;
@@ -35,6 +36,8 @@ export interface Habit {
   // display
   sort_order: number | null;
   group_id: string | null;
+  // health connect sync (null = not auto-fed)
+  health_source: HealthSource | null;
   skip_id?: string | null;
   is_skipped?: boolean;
   skip_scope?: SkipScope | null;
