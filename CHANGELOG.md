@@ -2,7 +2,30 @@
 
 All notable changes to Routine Manager are documented here. This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] - 2026-05-07
+
+### Added
+
+- **Health Connect Sync** — Optional `/api/health/webhook` endpoint receives data from the [sujay-patni/health-connect-webhook](https://github.com/sujay-patni/health-connect-webhook) Android app (a fork of mcnaveen's HC Webhook with raw per-record `StepsRecord` reads) and writes Health Connect steps, sleep, distance, and active calories straight into habit Completions. Each habit opts in via a new `Health Source` Notion select (`steps`, `sleep_minutes`, `distance_meters`, `active_calories`). Sleep is attributed to the day the session ended; activity to the logical day under `Day Start Hour`. Idempotent — repeated syncs overwrite the day's row instead of duplicating. Auth is a bearer token from `HEALTH_WEBHOOK_SECRET`.
+- Health-synced habits show an Activity icon on Today and Settings → Habits, plus an in-app setup guide on the Habits settings page.
+- New habits created via the app default `Health Source` to `none` so it shows explicitly in Notion rather than blank.
+- `scripts/backfill-health-source.mjs` one-off helper to set `Health Source=none` on existing habits in Notion.
+- `HEALTH_WEBHOOK_DEBUG=1` env var logs sanitized request summaries for debugging without dumping raw health records.
+
+### Changed
+
+- Layout refactor: extracted `MainContent` so `/blocked` and `/unlock` render full-width without the desktop sidebar offset.
+
+### Notion / Setup Notes
+
+- New optional Habits property: `Health Source` (Select). Options: `none`, `steps`, `sleep_minutes`, `distance_meters`, `active_calories`. Required only if you want webhook-driven auto-sync; existing habits work unchanged without it.
+- New optional env var: `HEALTH_WEBHOOK_SECRET`. Required only if you wire up the webhook.
+
+### Sender notes
+
+- Recommended sender: [sujay-patni/health-connect-webhook](https://github.com/sujay-patni/health-connect-webhook). The fork emits raw `StepsRecord` entries instead of calendar-day aggregates so `Day Start Hour=4` step attribution is correct down to the minute. Enable its interval-mode `Send full 48-hour window` option when syncing to Routine so each retry overwrites the day with a complete recent total. Pre-built APK on the fork's Releases page.
+
+---
 
 ## [1.3.0] - 2026-04-28
 
