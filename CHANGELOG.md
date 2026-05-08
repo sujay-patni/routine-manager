@@ -2,6 +2,19 @@
 
 All notable changes to Routine Manager are documented here. This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-05-08
+
+### Fixed
+
+- **Step counts now match Samsung Health UI on days with a daily aggregate.** Samsung Health pushes both per-bout step records and a 24-hour merged "Combined" record to Health Connect. The normalizer previously summed these, double-counting; now records spanning ≥ 22 hours are detected as daily aggregates, bucketed by midpoint (so they land on the correct logical day even when the calendar-day window straddles `Day Start Hour`), and override the bout-level sum for the same `dayKey`. Bout durations are still summed independently for `duration_actual`, so "active walking time" stays meaningful.
+- **Partial-window syncs no longer overwrite previously-complete past days.** When the sender includes `sync.data_window_start` (hc-connect 1.8.5+), the normalizer skips upserts for past logical days that fall only partially inside `[data_window_start, webhook_timestamp]`. A sync at 1 AM with a 48 h lookback can no longer corrupt yesterday-minus-one with the 3-hour fragment that happens to be in the window. "Today" is always written (in-progress is expected to be partial), and days with a daily aggregate are always considered authoritative regardless of window.
+
+### Sender notes
+
+- Pairs with [sujay-patni/health-connect-webhook v1.8.5](https://github.com/sujay-patni/health-connect-webhook/releases/tag/v1.8.5). Older sender versions still work — the partial-window guard falls back to "always write" when `data_window_start` is missing, preserving prior behavior.
+
+---
+
 ## [1.4.0] - 2026-05-07
 
 ### Added
