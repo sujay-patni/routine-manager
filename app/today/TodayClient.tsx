@@ -273,6 +273,8 @@ export default function TodayClient({
         date: dateStr,
         weekStart,
         weekEnd,
+        weeklyTarget: habit.weekly_target,
+        completionsThisWeek: habit.completions_this_week,
       });
       if (result?.success && result.skip) {
         dispatchHabit({
@@ -933,7 +935,7 @@ export default function TodayClient({
                               {weekDays.map((d) => {
                                 const dayStr = format(d, "yyyy-MM-dd");
                                 const completed = completedSet.has(dayStr);
-                                const skipped = showDayStatus && skippedSet.has(dayStr);
+                                const skipped = skippedSet.has(dayStr);
                                 const scheduled = showDayStatus && isHabitScheduledForDay(habit, d);
                                 const missed = showDayStatus && scheduled && !completed && !skipped && isBefore(startOfDay(d), startOfDay(parsedDate));
                                 return (

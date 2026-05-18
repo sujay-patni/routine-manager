@@ -64,6 +64,7 @@ export interface AppEvent {
   recurrence_rule: string | null;
   surface_days: number;
   is_completed: boolean;
+  completed_dates: string[];   // YYYY-MM-DD list for recurring instance completions
   // scheduling
   time_of_day: TimeOfDay | null;
   due_time: string | null;       // "HH:MM" for tasks/deadlines

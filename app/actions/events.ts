@@ -8,6 +8,7 @@ import {
   createEvent as notionCreateEvent,
   completeEvent as notionCompleteEvent,
   setEventCompleted as notionSetEventCompleted,
+  setEventCompletedDate as notionSetEventCompletedDate,
   deleteEvent as notionDeleteEvent,
   updateEvent as notionUpdateEvent,
 } from "@/lib/notion/events";
@@ -97,7 +98,7 @@ export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
             const durMs = new Date(event.end_time).getTime() - new Date(event.start_time).getTime();
             newEnd = new Date(inst.getTime() + durMs).toISOString();
           }
-          todayEvents.push({ ...event, id: `${event.id}_${todayStr}`, start_time: inst.toISOString(), end_time: newEnd });
+          todayEvents.push({ ...event, id: `${event.id}_${todayStr}`, start_time: inst.toISOString(), end_time: newEnd, is_completed: event.completed_dates.includes(todayStr) });
         }
       } else {
         const eventDate = formatDateForDB(parseZonedOrLocal(event.start_time, timezone));
@@ -107,7 +108,7 @@ export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
       if (event.is_recurring) {
         const inst = getRecurrenceInstance(event, targetDate, timezone, todayStr);
         if (inst) {
-           todayEvents.push({ ...event, id: `${event.id}_${todayStr}`, due_date: todayStr });
+           todayEvents.push({ ...event, id: `${event.id}_${todayStr}`, due_date: todayStr, is_completed: event.completed_dates.includes(todayStr) });
         }
       } else {
         if (event.due_date === todayStr) todayEvents.push(event);
@@ -193,12 +194,14 @@ export async function getAllEventsForCalendar(): Promise<AppEvent[]> {
             id: `${event.id}_${instanceDateStr}`,
             start_time: inst.toISOString(),
             end_time: newEnd,
+            is_completed: event.completed_dates.includes(instanceDateStr),
           });
         } else if (event.event_type === "all_day") {
           result.push({
             ...event,
             id: `${event.id}_${instanceDateStr}`,
             due_date: instanceDateStr,
+            is_completed: event.completed_dates.includes(instanceDateStr),
           });
         }
       }
@@ -252,7 +255,12 @@ export async function completeEvent(id: string) {
 export async function setEventCompleted(id: string, isCompleted: boolean, durationActual?: number) {
   try {
     const baseId = baseEventId(id);
-    await notionSetEventCompleted(baseId, isCompleted, durationActual);
+    const instanceDate = id.includes("_") ? id.split("_").slice(1).join("_") : null;
+    if (instanceDate) {
+      await notionSetEventCompletedDate(baseId, instanceDate, isCompleted, durationActual);
+    } else {
+      await notionSetEventCompleted(baseId, isCompleted, durationActual);
+    }
     revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");

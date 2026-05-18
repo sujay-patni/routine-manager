@@ -34,6 +34,7 @@ import { consumeVacationDbUnavailable, getVacationsOverlapping } from "@/lib/not
 import { getSettings } from "@/app/actions/settings";
 import { getTodayEvents } from "@/app/actions/events";
 import { toZonedTime } from "date-fns-tz";
+import { addDays, differenceInCalendarDays, parseISO } from "date-fns";
 import type { Habit, HabitFrequency, ProgressPeriod, SkipScope } from "@/lib/notion/types";
 
 export type { Habit };
@@ -84,8 +85,36 @@ function getPeriodStart(
   }
 }
 
-function habitSkipScope(frequency: HabitFrequency): SkipScope {
-  return frequency === "weekly" ? "week" : "day";
+/**
+ * Decide skip scope for a habit. For weekly-target habits we default to "day"
+ * but escalate to "week" when, after this skip, the target is mathematically
+ * unreachable (no point pretending the user can still hit it).
+ */
+async function resolveHabitSkipScope(args: {
+  habitId: string;
+  frequency: HabitFrequency;
+  date: string;
+  weekStart: string;
+  weekEnd: string;
+  weeklyTarget: number | null | undefined;
+  completionsThisWeek: number | null | undefined;
+}): Promise<SkipScope> {
+  if (args.frequency !== "weekly" || args.weeklyTarget == null) return "day";
+  const completions = args.completionsThisWeek ?? 0;
+  // Days strictly after the skipped date through weekEnd.
+  const daysAfter = Math.max(0, differenceInCalendarDays(parseISO(args.weekEnd), parseISO(args.date)));
+  // Subtract any existing future day-skips for this habit (they can't host a completion either).
+  const existingSkips = await cachedGetSkipsForWindow(args.date, args.weekStart, args.weekEnd);
+  const futureDaySkips = existingSkips.filter(
+    (s) =>
+      s.item_type === "habit" &&
+      s.item_id === args.habitId &&
+      s.scope === "day" &&
+      s.date != null &&
+      s.date > args.date
+  ).length;
+  const maxAdditional = Math.max(0, daysAfter - futureDaySkips);
+  return completions + maxAdditional < args.weeklyTarget ? "week" : "day";
 }
 
 export async function getTodayHabits(dateStr?: string) {
@@ -203,7 +232,12 @@ export async function getTodayHabits(dateStr?: string) {
       )
       .flatMap((s) => {
         if (s.scope === "day") return s.date ? [s.date] : [];
-        return [weekStartStr];
+        // Week-scope: cover every day in the week so the strip shows the skip icon across the row.
+        const out: string[] = [];
+        const startD = parseISO(weekStartStr);
+        const endD = parseISO(weekEndStr);
+        for (let d = startD; d <= endD; d = addDays(d, 1)) out.push(formatDateForDB(d));
+        return out;
       });
     if (habitVacationDates) {
       for (const d of habitVacationDates) {
@@ -272,9 +306,7 @@ export async function getTodayHabits(dateStr?: string) {
       is_skipped: !!skip || isOnVacationToday,
       skip_scope: skip?.scope ?? (isOnVacationToday ? "day" : null),
       completions_by_date: completedDatesForWeek,
-      skipped_dates: h.frequency === "weekly"
-        ? []
-        : skippedDatesForWeek.filter((date) => isHabitScheduledForDay(h, parseZonedOrLocal(date, timezone))),
+      skipped_dates: skippedDatesForWeek.filter((date) => isHabitScheduledForDay(h, parseZonedOrLocal(date, timezone))),
     };
   });
 
@@ -320,9 +352,19 @@ export async function skipHabit(data: {
   date: string;
   weekStart: string;
   weekEnd: string;
+  weeklyTarget?: number | null;
+  completionsThisWeek?: number;
 }) {
   try {
-    const scope = habitSkipScope(data.frequency);
+    const scope = await resolveHabitSkipScope({
+      habitId: data.habitId,
+      frequency: data.frequency,
+      date: data.date,
+      weekStart: data.weekStart,
+      weekEnd: data.weekEnd,
+      weeklyTarget: data.weeklyTarget,
+      completionsThisWeek: data.completionsThisWeek,
+    });
     const skip = await createSkip({
       item_type: "habit",
       item_id: data.habitId,

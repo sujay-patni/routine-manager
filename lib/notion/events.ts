@@ -27,6 +27,13 @@ async function ensureDurationProperties(): Promise<void> {
   });
 }
 
+async function ensureCompletedDatesProperty(): Promise<void> {
+  await (notion.dataSources as any).update({
+    data_source_id: EVENTS_DB,
+    properties: { "Completed Dates": { rich_text: {} } },
+  });
+}
+
 function pageToEvent(page: any): AppEvent {
   const props = page.properties;
   const startTime = props["Start Time"]?.date?.start ?? null;
@@ -43,6 +50,7 @@ function pageToEvent(page: any): AppEvent {
     recurrence_rule: getText(props["Recurrence Rule"]) || null,
     surface_days: props["Surface Days"]?.number ?? 3,
     is_completed: getCheckbox(props["Completed"]),
+    completed_dates: (getText(props["Completed Dates"]) || "").split(",").filter(Boolean),
     time_of_day: (getSelect(props["Time of Day"]) as TimeOfDay) || null,
     due_time: getText(props["Due Time"]) || null,
     group_id: getRelationIds(props["Group"])[0] ?? null,
@@ -176,6 +184,34 @@ export async function setEventCompleted(id: string, isCompleted: boolean, durati
     if (!isMissingColumn) throw e;
     await ensureDurationProperties();
     await notion.pages.update({ page_id: id, properties: props });
+  }
+}
+
+export async function setEventCompletedDate(
+  id: string,
+  date: string,
+  isCompleted: boolean,
+  durationActual?: number
+): Promise<void> {
+  const page = await notion.pages.retrieve({ page_id: id });
+  // @ts-expect-error - Notion typing is incomplete
+  const currentStr = page.properties["Completed Dates"]?.rich_text?.[0]?.plain_text || "";
+  const dates: string[] = currentStr ? currentStr.split(",").filter(Boolean) : [];
+  const newDates = isCompleted
+    ? (dates.includes(date) ? dates : [...dates, date])
+    : dates.filter((d) => d !== date);
+  const props: Record<string, any> = {
+    "Completed Dates": { rich_text: [{ text: { content: newDates.join(",") } }] },
+  };
+  if (isCompleted && durationActual !== undefined) props["Duration Actual"] = { number: durationActual };
+  try {
+    await notion.pages.update({ page_id: id, properties: props });
+  } catch (e: any) {
+    const msg: string = e?.message ?? String(e);
+    if (msg.includes("is not a property") || msg.includes("not a property that exists")) {
+      await ensureCompletedDatesProperty();
+      await notion.pages.update({ page_id: id, properties: props });
+    } else throw e;
   }
 }
 
