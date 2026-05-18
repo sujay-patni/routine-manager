@@ -52,7 +52,8 @@ export async function getSkipsForWindow(date: string, weekStart: string, weekEnd
             {
               and: [
                 { property: "Scope", select: { equals: "day" } },
-                { property: "Date", date: { equals: date } },
+                { property: "Date", date: { on_or_after: weekStart } },
+                { property: "Date", date: { on_or_before: weekEnd } },
               ],
             },
             {
