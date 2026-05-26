@@ -11,15 +11,15 @@ export default function TodayError({ reset }: { error: Error & { digest?: string
       </header>
       <main className="flex-1 flex flex-col items-center justify-center px-4 bottom-nav-offset lg:pb-8 text-center gap-4">
         <p className="text-4xl">⚠️</p>
-        <h2 className="font-semibold text-lg">Notion isn&apos;t responding</h2>
+        <h2 className="font-semibold text-lg">Database isn&apos;t responding</h2>
         <p className="text-sm text-muted-foreground max-w-xs">
-          The sync timed out. Your data is safe — tap retry to try again.
+          The request timed out. Your data is safe — tap retry to try again.
         </p>
         <button
           onClick={reset}
           className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:scale-95 transition-all"
         >
-          Retry sync
+          Retry
         </button>
       </main>
     </div>

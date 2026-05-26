@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import VacationEditorSheet, { type EditorMode } from "@/components/VacationEditorSheet";
 import { endVacationNow, removeVacation } from "@/app/actions/vacations";
-import type { Habit, Group, Vacation } from "@/lib/notion/types";
+import type { Habit, Group, Vacation } from "@/lib/domain/types";
 
 interface Props {
   vacations: Vacation[];

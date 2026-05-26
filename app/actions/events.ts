@@ -1,22 +1,21 @@
 "use server";
 
-import { after } from "next/server";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import {
   getAllEvents,
   getAllEventsIncludingCompleted,
-  createEvent as notionCreateEvent,
-  completeEvent as notionCompleteEvent,
-  setEventCompleted as notionSetEventCompleted,
-  setEventCompletedDate as notionSetEventCompletedDate,
-  deleteEvent as notionDeleteEvent,
-  updateEvent as notionUpdateEvent,
-} from "@/lib/notion/events";
-import { createSkip, deleteSkip, getSkipsForWindow } from "@/lib/notion/skips";
+  createEvent as dbCreateEvent,
+  completeEvent as dbCompleteEvent,
+  setEventCompleted as dbSetEventCompleted,
+  setEventCompletedDate as dbSetEventCompletedDate,
+  deleteEvent as dbDeleteEvent,
+  updateEvent as dbUpdateEvent,
+} from "@/lib/db/events";
+import { createSkip, deleteSkip, getSkipsForWindow } from "@/lib/db/skips";
 import { getWeekBoundaries, getWeekBoundariesForDate, formatDateForDB, getDeadlineState, parseZonedOrLocal } from "@/lib/habit-logic";
 import { getSettings } from "@/app/actions/settings";
 import { toZonedTime } from "date-fns-tz";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent } from "@/lib/domain/types";
 
 const cachedGetAllEventsIncludingCompleted = unstable_cache(
   getAllEventsIncludingCompleted,
@@ -230,7 +229,7 @@ export async function createEvent(data: {
   group_id?: string | null;
 }) {
   try {
-    await notionCreateEvent(data);
+    await dbCreateEvent(data);
     revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
@@ -242,14 +241,16 @@ export async function createEvent(data: {
 }
 
 export async function completeEvent(id: string) {
-  after(async () => {
-    await notionCompleteEvent(id);
+  try {
+    await dbCompleteEvent(id);
     revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
     revalidatePath("/calendar");
-  });
-  return { success: true };
+    return { success: true };
+  } catch (e) {
+    return { error: String(e) };
+  }
 }
 
 export async function setEventCompleted(id: string, isCompleted: boolean, durationActual?: number) {
@@ -257,9 +258,9 @@ export async function setEventCompleted(id: string, isCompleted: boolean, durati
     const baseId = baseEventId(id);
     const instanceDate = id.includes("_") ? id.split("_").slice(1).join("_") : null;
     if (instanceDate) {
-      await notionSetEventCompletedDate(baseId, instanceDate, isCompleted, durationActual);
+      await dbSetEventCompletedDate(baseId, instanceDate, isCompleted, durationActual);
     } else {
-      await notionSetEventCompleted(baseId, isCompleted, durationActual);
+      await dbSetEventCompleted(baseId, isCompleted, durationActual);
     }
     revalidateTag("events", {});
     revalidatePath("/today");
@@ -307,7 +308,7 @@ export async function unskipEvent(skipId: string) {
 
 export async function deleteEvent(id: string, excludeDate?: string) {
   try {
-    await notionDeleteEvent(id, excludeDate);
+    await dbDeleteEvent(id, excludeDate);
     revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");
@@ -337,7 +338,7 @@ export async function updateEvent(
   }>
 ) {
   try {
-    await notionUpdateEvent(id, data);
+    await dbUpdateEvent(id, data);
     revalidateTag("events", {});
     revalidatePath("/today");
     revalidatePath("/schedule");

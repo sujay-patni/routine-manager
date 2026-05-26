@@ -2,7 +2,7 @@
 
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import {
-  getAllHabits as notionGetAllHabits,
+  getAllHabits as dbGetAllHabits,
   getAllHabitsIncludingInactive,
   getCompletionsForWeek,
   getCompletionsForDate,
@@ -10,12 +10,12 @@ import {
   findAndDeleteCompletion,
   findCompletion,
   updateCompletionProgress,
-  createHabit as notionCreateHabit,
-  updateHabit as notionUpdateHabit,
-  deleteHabit as notionDeleteHabit,
+  createHabit as dbCreateHabit,
+  updateHabit as dbUpdateHabit,
+  deleteHabit as dbDeleteHabit,
   ensureHabitSortOrderColumn,
   ensureHabitDurationColumns,
-} from "@/lib/notion/habits";
+} from "@/lib/db/habits";
 import {
   getWeekBoundaries,
   getWeekBoundariesForDate,
@@ -29,17 +29,17 @@ import {
   consumeSkipsDbUnavailable,
   deleteSkip,
   getSkipsForWindow,
-} from "@/lib/notion/skips";
-import { consumeVacationDbUnavailable, getVacationsOverlapping } from "@/lib/notion/vacations";
+} from "@/lib/db/skips";
+import { consumeVacationDbUnavailable, getVacationsOverlapping } from "@/lib/db/vacations";
 import { getSettings } from "@/app/actions/settings";
 import { getTodayEvents } from "@/app/actions/events";
 import { toZonedTime } from "date-fns-tz";
 import { addDays, differenceInCalendarDays, parseISO } from "date-fns";
-import type { Habit, HabitFrequency, ProgressPeriod, SkipScope } from "@/lib/notion/types";
+import type { Habit, HabitFrequency, HealthSource, ProgressPeriod, SkipScope } from "@/lib/domain/types";
 
 export type { Habit };
 
-const cachedGetAllHabits = unstable_cache(notionGetAllHabits, ["habits-active"], {
+const cachedGetAllHabits = unstable_cache(dbGetAllHabits, ["habits-active"], {
   tags: ["habits"],
   revalidate: 300,
 });
@@ -435,7 +435,7 @@ export async function createHabit(data: {
 }) {
   const hasProgress = data.progress_metric || data.progress_target != null;
   try {
-    await notionCreateHabit({
+    await dbCreateHabit({
       ...data,
       weekly_target:
         data.frequency === "weekly" ? (data.weekly_target ?? 3) : data.weekly_target,
@@ -449,7 +449,7 @@ export async function createHabit(data: {
     if (msg.includes("is not a property that exists") || msg.includes("not a property")) {
       try {
         await ensureHabitDurationColumns();
-        await notionCreateHabit({
+        await dbCreateHabit({
           ...data,
           weekly_target:
             data.frequency === "weekly" ? (data.weekly_target ?? 3) : data.weekly_target,
@@ -468,7 +468,7 @@ export async function createHabit(data: {
       } catch {
         if (hasProgress) {
           try {
-            await notionCreateHabit({
+            await dbCreateHabit({
               ...data,
               weekly_target:
                 data.frequency === "weekly" ? (data.weekly_target ?? 3) : data.weekly_target,
@@ -485,7 +485,7 @@ export async function createHabit(data: {
             return {
               success: true,
               warning:
-                "Habit added, but progress tracking was skipped — your Notion Habits database is missing these columns: Progress Metric (text), Progress Target (number), Progress Start (number), Progress Period (select). Add them in Notion, then edit this habit to enable progress tracking.",
+                "Habit added, but progress tracking was skipped. Check the database schema, then edit this habit to enable progress tracking.",
             };
           } catch (e3) {
             return { error: String(e3) };
@@ -518,6 +518,7 @@ export async function updateHabit(
     duration_minutes: number | null;
     sort_order: number | null;
     group_id: string | null;
+    health_source: HealthSource | null;
   }>
 ) {
   const hasNewFields =
@@ -529,7 +530,7 @@ export async function updateHabit(
     data.duration_minutes !== undefined;
 
   try {
-    await notionUpdateHabit(id, data);
+    await dbUpdateHabit(id, data);
     revalidateTag("habits", {});
     revalidatePath("/today");
     revalidatePath("/settings");
@@ -540,7 +541,7 @@ export async function updateHabit(
     if (hasNewFields && (msg.includes("is not a property that exists") || msg.includes("not a property"))) {
       try {
         await ensureHabitDurationColumns();
-        await notionUpdateHabit(id, data);
+        await dbUpdateHabit(id, data);
         revalidateTag("habits", {});
         revalidatePath("/today");
         revalidatePath("/settings");
@@ -557,7 +558,7 @@ export async function updateHabit(
 /** Reorders habits by writing sort_order = index * 10 for each id in the array. */
 export async function reorderHabits(habitIds: string[]) {
   const doReorder = () =>
-    Promise.all(habitIds.map((id, index) => notionUpdateHabit(id, { sort_order: index * 10 })));
+    Promise.all(habitIds.map((id, index) => dbUpdateHabit(id, { sort_order: index * 10 })));
 
   try {
     await doReorder();
@@ -589,7 +590,7 @@ export async function getAllHabits(): Promise<Habit[]> {
 
 export async function deleteHabit(id: string) {
   try {
-    await notionDeleteHabit(id);
+    await dbDeleteHabit(id);
     revalidateTag("habits", {});
     revalidatePath("/today");
     revalidatePath("/settings");
@@ -608,7 +609,7 @@ export async function getWeeklySummary() {
   const weekEndStr = formatDateForDB(weekEnd);
 
   const [habits, completions] = await Promise.all([
-    notionGetAllHabits(),
+    dbGetAllHabits(),
     getCompletionsForWeek(weekStartStr, weekEndStr),
   ]);
 

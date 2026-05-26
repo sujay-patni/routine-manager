@@ -35,13 +35,7 @@ const COMMON_TIMEZONES = [
   "Pacific/Honolulu",
 ];
 
-interface Props {
-  notionHabitsUrl?: string;
-  notionEventsUrl?: string;
-  notionSettingsConfigured?: boolean;
-}
-
-export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notionSettingsConfigured }: Props) {
+export default function SettingsClient() {
   const settings = useSettings();
   const router = useRouter();
 
@@ -58,8 +52,6 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
   const [progressUnits, setProgressUnits] = useState(settings.progress_units ?? ["mins", "hrs"]);
   const [newUnit, setNewUnit] = useState("");
   const FIXED_UNITS = ["mins", "hrs"];
-
-  const notionEnabled = notionSettingsConfigured === true || settings.id !== "env";
 
   async function handleSaveSettings(e: React.FormEvent) {
     e.preventDefault();
@@ -129,12 +121,6 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
         {/* ─── Preferences ─── */}
         <section className="space-y-4">
           <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Preferences</h2>
-
-          {!notionEnabled && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
-              <strong>Tip:</strong> To save settings in-app, add a <code className="bg-muted px-1 rounded">NOTION_SETTINGS_DB_ID</code> env var pointing to a Notion database with <em>Timezone</em>, <em>Week Start Day</em>, and <em>Deadline Surface Days</em> fields. Until then, changes here won&apos;t persist across deploys.
-            </div>
-          )}
 
           <form onSubmit={handleSaveSettings} className="rounded-2xl border bg-card card-elevated p-4 space-y-4">
             <div className="space-y-2">
@@ -258,11 +244,6 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
             Units used when tracking habit progress. <strong>mins</strong> and <strong>hrs</strong> are built-in time units — the progress value IS the time. Custom units can have a conversion rate set per-habit.
           </p>
           <div className="rounded-2xl border bg-card card-elevated p-4 space-y-4">
-            {!notionEnabled && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                Custom units require <code className="bg-muted px-1 rounded">NOTION_SETTINGS_DB_ID</code> to persist across reloads.
-              </p>
-            )}
             <div className="flex flex-wrap gap-2">
               {progressUnits.map(unit => (
                 <span
@@ -270,7 +251,7 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border bg-muted"
                 >
                   {unit}
-                  {notionEnabled && !FIXED_UNITS.includes(unit) && (
+                  {!FIXED_UNITS.includes(unit) && (
                     <button
                       type="button"
                       onClick={() => removeProgressUnit(unit)}
@@ -285,20 +266,18 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
                 </span>
               ))}
             </div>
-            {notionEnabled && (
-              <form
-                onSubmit={(e) => { e.preventDefault(); addProgressUnit(); }}
-                className="flex gap-2"
-              >
-                <Input
-                  value={newUnit}
-                  onChange={e => setNewUnit(e.target.value)}
-                  placeholder="e.g. pages, reps, km"
-                  className="flex-1"
-                />
-                <Button type="submit" variant="outline" size="sm">Add</Button>
-              </form>
-            )}
+            <form
+              onSubmit={(e) => { e.preventDefault(); addProgressUnit(); }}
+              className="flex gap-2"
+            >
+              <Input
+                value={newUnit}
+                onChange={e => setNewUnit(e.target.value)}
+                placeholder="e.g. pages, reps, km"
+                className="flex-1"
+              />
+              <Button type="submit" variant="outline" size="sm">Add</Button>
+            </form>
           </div>
         </section>
 
@@ -355,47 +334,16 @@ export default function SettingsClient({ notionHabitsUrl, notionEventsUrl, notio
 
         <Separator />
 
-        {/* ─── Notion Export ─── */}
+        {/* ─── Data ─── */}
         <section className="space-y-3">
-          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Data & Export</h2>
+          <h2 className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Data</h2>
           <p className="text-[12px] text-muted-foreground leading-relaxed">
-            All your habits, completions, events, and history live directly in your Notion workspace. You can view, filter, and export them at any time.
+            All habits, completions, events, and history are stored in Postgres. Use regular database backups or exports from your Neon dashboard when you want a copy of your data.
           </p>
-          <div className="space-y-2">
-            {notionHabitsUrl && (
-              <a
-                href={notionHabitsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 px-3.5 py-3 rounded-xl border bg-card text-[13px] hover:bg-muted transition-colors"
-              >
-                <span>📋</span>
-                <span className="flex-1 font-medium">Open Habits in Notion</span>
-                <span className="text-muted-foreground">↗</span>
-              </a>
-            )}
-            {notionEventsUrl && (
-              <a
-                href={notionEventsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 px-3.5 py-3 rounded-xl border bg-card text-[13px] hover:bg-muted transition-colors"
-              >
-                <span>📅</span>
-                <span className="flex-1 font-medium">Open Events in Notion</span>
-                <span className="text-muted-foreground">↗</span>
-              </a>
-            )}
-            {!notionHabitsUrl && !notionEventsUrl && (
-              <p className="text-xs text-muted-foreground">
-                Open <a href="https://notion.so" target="_blank" rel="noopener noreferrer" className="text-primary underline">notion.so</a> and find your Routine databases.
-              </p>
-            )}
-          </div>
         </section>
 
         <div className="pt-4 border-t text-center text-[11px] text-muted-foreground tracking-[.08em]">
-          Powered by Notion
+          Powered by Postgres
         </div>
 
       </main>

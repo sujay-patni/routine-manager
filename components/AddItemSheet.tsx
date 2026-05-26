@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { createHabit } from "@/app/actions/habits";
 import { createEvent } from "@/app/actions/events";
-import type { HabitFrequency, Group } from "@/lib/notion/types";
+import type { HabitFrequency, Group } from "@/lib/domain/types";
 import { cn } from "@/lib/utils";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import type { ProcessedHabit } from "@/lib/habit-logic";

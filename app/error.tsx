@@ -7,13 +7,13 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
         <p className="text-4xl">⚠️</p>
         <h2 className="font-semibold text-lg">Something went wrong</h2>
         <p className="text-sm text-muted-foreground max-w-xs">
-          Notion may be temporarily unavailable. Your data is safe — tap retry to try again.
+          The database may be temporarily unavailable. Your data is safe — tap retry to try again.
         </p>
         <button
           onClick={reset}
           className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:scale-95 transition-all"
         >
-          Retry sync
+          Retry
         </button>
       </main>
     </div>

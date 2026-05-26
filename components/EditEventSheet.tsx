@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events";
-import type { AppEvent, Group } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/domain/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { useIsMobile } from "@/lib/useMediaQuery";
 

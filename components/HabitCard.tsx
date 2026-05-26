@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useSwipeReveal } from "@/lib/useSwipeReveal";
-import type { Group } from "@/lib/notion/types";
+import type { Group } from "@/lib/domain/types";
 
 interface HabitCardProps {
   habit: ProcessedHabit;

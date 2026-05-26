@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { Group } from "@/lib/notion/types";
+import type { Group } from "@/lib/domain/types";
 
 interface GroupFilterBarProps {
   groups: Group[];

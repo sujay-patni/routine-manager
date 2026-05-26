@@ -20,23 +20,18 @@ export interface Habit {
   icon: string;
   is_active: boolean;
   created_at: string;
-  // scheduling
   time_of_day: TimeOfDay | null;
-  exact_time: string | null;      // "HH:MM"
-  specific_days: string | null;   // "MO,WE,FR" | "1,15" | "01-15"
-  // progress tracking
-  progress_metric: string | null; // unit name e.g. "steps", "mins", "hrs"
-  progress_target: number | null; // e.g. 10000
-  progress_start: number | null;  // e.g. 0
-  progress_period: ProgressPeriod | null; // "daily" | "weekly" | "monthly" | "yearly"
-  progress_conversion: number | null; // minutes per unit (right/left); null = 1
-  progress_conversion_base: number | null; // the left-side quantity (e.g. 1000 for "1000 steps = 10 mins")
-  // duration
-  duration_minutes: number | null; // default expected time per completion (minutes)
-  // display
+  exact_time: string | null;
+  specific_days: string | null;
+  progress_metric: string | null;
+  progress_target: number | null;
+  progress_start: number | null;
+  progress_period: ProgressPeriod | null;
+  progress_conversion: number | null;
+  progress_conversion_base: number | null;
+  duration_minutes: number | null;
   sort_order: number | null;
   group_id: string | null;
-  // health connect sync (null = not auto-fed)
   health_source: HealthSource | null;
   skip_id?: string | null;
   is_skipped?: boolean;
@@ -46,10 +41,10 @@ export interface Habit {
 export interface Completion {
   id: string;
   habit_id: string;
-  date: string;       // YYYY-MM-DD
+  date: string;
   note: string | null;
   progress_value: number | null;
-  duration_actual: number | null; // actual time spent in minutes
+  duration_actual: number | null;
 }
 
 export interface AppEvent {
@@ -57,21 +52,19 @@ export interface AppEvent {
   title: string;
   description: string | null;
   event_type: "timed" | "all_day" | "deadline";
-  start_time: string | null;   // ISO datetime (timed events)
-  end_time: string | null;     // ISO datetime (optional)
-  due_date: string | null;     // YYYY-MM-DD
+  start_time: string | null;
+  end_time: string | null;
+  due_date: string | null;
   is_recurring: boolean;
   recurrence_rule: string | null;
   surface_days: number;
   is_completed: boolean;
-  completed_dates: string[];   // YYYY-MM-DD list for recurring instance completions
-  // scheduling
+  completed_dates: string[];
   time_of_day: TimeOfDay | null;
-  due_time: string | null;       // "HH:MM" for tasks/deadlines
+  due_time: string | null;
   group_id: string | null;
-  // duration
-  duration_minutes: number | null; // default expected time (minutes)
-  duration_actual: number | null;  // actual time logged at completion (minutes)
+  duration_minutes: number | null;
+  duration_actual: number | null;
   skip_id?: string | null;
   is_skipped?: boolean;
   skip_scope?: SkipScope | null;
@@ -98,8 +91,8 @@ export interface Vacation {
   id: string;
   name: string;
   is_template: boolean;
-  start_date: string | null;  // YYYY-MM-DD; null for templates
-  end_date: string | null;    // YYYY-MM-DD; null for templates
+  start_date: string | null;
+  end_date: string | null;
   habit_ids: string[];
   group_ids: string[];
   note: string | null;
@@ -110,6 +103,6 @@ export interface AppSettings {
   timezone: string;
   week_start_day: number;
   deadline_surface_days: number;
-  day_start_hour: number; // 0–23; habits don't reset until this hour (0 = midnight)
-  progress_units: string[]; // available units for progress tracking (always includes "mins","hrs")
+  day_start_hour: number;
+  progress_units: string[];
 }

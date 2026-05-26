@@ -19,17 +19,16 @@ All notable changes to Routine Manager are documented here. This project adheres
 
 ### Added
 
-- **Health Connect Sync** — Optional `/api/health/webhook` endpoint receives data from the [sujay-patni/health-connect-webhook](https://github.com/sujay-patni/health-connect-webhook) Android app (a fork of mcnaveen's HC Webhook with raw per-record `StepsRecord` reads) and writes Health Connect steps, sleep, distance, and active calories straight into habit Completions. Each habit opts in via a new `Health Source` Notion select (`steps`, `sleep_minutes`, `distance_meters`, `active_calories`). Sleep is attributed to the day the session ended; activity to the logical day under `Day Start Hour`. Idempotent — repeated syncs overwrite the day's row instead of duplicating. Auth is a bearer token from `HEALTH_WEBHOOK_SECRET`.
+- **Health Connect Sync** — Optional `/api/health/webhook` endpoint receives data from the [sujay-patni/health-connect-webhook](https://github.com/sujay-patni/health-connect-webhook) Android app (a fork of mcnaveen's HC Webhook with raw per-record `StepsRecord` reads) and writes Health Connect steps, sleep, distance, and active calories straight into habit Completions. Each habit opts in via a `Health Source` field (`steps`, `sleep_minutes`, `distance_meters`, `active_calories`). Sleep is attributed to the day the session ended; activity to the logical day under `Day Start Hour`. Idempotent — repeated syncs overwrite the day's row instead of duplicating. Auth is a bearer token from `HEALTH_WEBHOOK_SECRET`.
 - Health-synced habits show an Activity icon on Today and Settings → Habits, plus an in-app setup guide on the Habits settings page.
-- New habits created via the app default `Health Source` to `none` so it shows explicitly in Notion rather than blank.
-- `scripts/backfill-health-source.mjs` one-off helper to set `Health Source=none` on existing habits in Notion.
+- New habits created via the app default `Health Source` to `none`.
 - `HEALTH_WEBHOOK_DEBUG=1` env var logs sanitized request summaries for debugging without dumping raw health records.
 
 ### Changed
 
 - Layout refactor: extracted `MainContent` so `/blocked` and `/unlock` render full-width without the desktop sidebar offset.
 
-### Notion / Setup Notes
+### Setup Notes
 
 - New optional Habits property: `Health Source` (Select). Options: `none`, `steps`, `sleep_minutes`, `distance_meters`, `active_calories`. Required only if you want webhook-driven auto-sync; existing habits work unchanged without it.
 - New optional env var: `HEALTH_WEBHOOK_SECRET`. Required only if you wire up the webhook.
@@ -69,9 +68,7 @@ All notable changes to Routine Manager are documented here. This project adheres
 - Fixed bottom navigation appearing above sheets/modals.
 - Suppressed urgent habit styling during late-night carryover windows.
 
-### Notion / Setup Notes
-
-New optional databases: `NOTION_GROUPS_DB_ID`, `NOTION_SKIPS_DB_ID`, `NOTION_VACATIONS_DB_ID`
+### Setup Notes
 
 New or updated fields:
 - Habits: `Duration`, `Group`, `Progress Conversion`, `Progress Conversion Base`
@@ -87,7 +84,7 @@ New or updated fields:
 
 - **Habit & Event Detail Sheets** — Tapping a habit or event card opens a read-only detail view showing all metadata (frequency schedule, progress period, timing, description). An Edit button jumps directly to the edit form.
 - **Dark / Light Theme** — Dark mode support with `localStorage` persistence and automatic system-preference detection on first launch. Toggle available in Settings.
-- **Settings Context Provider** — App settings available globally via React context (`useSettings()`), eliminating redundant Notion fetches across pages.
+- **Settings Context Provider** — App settings available globally via React context (`useSettings()`), eliminating redundant settings fetches across pages.
 
 ### Changed
 
@@ -106,8 +103,8 @@ New or updated fields:
 
 ### Added
 
-- **Progress period** (`daily` / `weekly` / `monthly` / `yearly`) per habit — progress resets at the end of each period; requires `Progress Period` (Select) field added to Notion Habits DB
-- **Sort order** — ↑↓ reorder buttons in Settings; order persisted to Notion as `sort_order`; requires `Sort Order` (Number) field added to Notion Habits DB
+- **Progress period** (`daily` / `weekly` / `monthly` / `yearly`) per habit — progress resets at the end of each period.
+- **Sort order** — ↑↓ reorder buttons in Settings; order persisted as `sort_order`.
 - **Edit Habit Sheet** — full in-app editing (name, description, frequency, specific days/dates, timing, progress target + period)
 - **Edit Event Sheet** — description field added
 - **History navigation** — Today page accepts `?date=YYYY-MM-DD` query param to view any past date
@@ -134,8 +131,8 @@ New or updated fields:
 - **Edit Habit Sheet** — edit existing habits without leaving the app
 - **Edit Event Sheet** — edit existing events without leaving the app
 - **Progress input** — inline numeric progress logging on habit cards
-- **Settings** — timezone, week start day, and deadline surface days; stored in Notion Settings DB or env vars
-- **Notion-backed storage** — habits, completions, events, and settings all backed by Notion databases
+- **Settings** — timezone, week start day, and deadline surface days.
+- **Database-backed storage** — habits, completions, events, and settings all persist in the app database.
 
 ### Changed
 

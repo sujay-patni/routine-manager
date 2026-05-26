@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { saveVacation, applyTemplate } from "@/app/actions/vacations";
 import { useIsMobile } from "@/lib/useMediaQuery";
-import type { Habit, Group, Vacation } from "@/lib/notion/types";
+import type { Habit, Group, Vacation } from "@/lib/domain/types";
 
 export type EditorMode = "instance" | "template" | "apply";
 

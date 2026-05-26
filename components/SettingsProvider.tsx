@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { AppSettings } from "@/lib/notion/types";
+import type { AppSettings } from "@/lib/domain/types";
 
 const SettingsContext = createContext<AppSettings | null>(null);
 

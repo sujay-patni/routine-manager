@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyCookie, getCookieName } from "@/lib/auth";
-import { isDeviceAllowed } from "@/lib/notion/devices";
+import { isDeviceAllowed } from "@/lib/db/devices";
 
 const ALWAYS_PUBLIC = [
   "/_next",
@@ -46,7 +46,7 @@ export async function proxy(request: NextRequest) {
     return res;
   }
 
-  // Check device against Notion whitelist
+  // Check device against the database allowlist
   const allowed = await isDeviceAllowed(deviceId);
   if (!allowed) {
     const url = request.nextUrl.clone();

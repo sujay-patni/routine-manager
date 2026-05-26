@@ -1,7 +1,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { randomUUID, timingSafeEqual } from "crypto";
-import { getAllHabits, upsertCompletion } from "@/lib/notion/habits";
-import { getAppSettings } from "@/lib/notion/settings";
+import { getAllHabits, upsertCompletion } from "@/lib/db/habits";
+import { getAppSettings } from "@/lib/db/settings";
 import { parseWebhookPayload } from "@/lib/health/normalize";
 import { webhookPayloadSchema, type HealthSource } from "@/lib/health/types";
 

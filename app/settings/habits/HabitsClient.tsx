@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { updateHabit, getAllHabits, reorderHabits } from "@/app/actions/habits";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditHabitSheet from "@/components/EditHabitSheet";
-import type { Habit, Group } from "@/lib/notion/types";
+import type { Habit, Group } from "@/lib/domain/types";
 
 type SectionKey = "morning" | "afternoon" | "evening" | "night" | "all_day";
 
@@ -154,7 +154,7 @@ export default function HabitsClient({ habits: initialHabits, groups }: Props) {
             <p>Auto-fill steps, sleep, distance, or active calories from your Android phone&apos;s Health Connect.</p>
             <ol className="list-decimal pl-5 space-y-1">
               <li>
-                In your Notion Habits DB, set <code className="text-xs">Health Source</code> on the habit
+                Set <code className="text-xs">Health Source</code> in the habit editor
                 {" "}(one of <code className="text-xs">steps</code>, <code className="text-xs">sleep_minutes</code>,
                 {" "}<code className="text-xs">distance_meters</code>, <code className="text-xs">active_calories</code>).
               </li>

@@ -8,14 +8,14 @@ A complete inventory of what the app does and how it currently looks, intended a
 
 ### What it is
 
-**Routine** is a personal daily-system app for tracking habits, scheduled events, all-day tasks, and deadlines — backed by the user's own Notion workspace. The name shown everywhere in the app is "Routine". The tagline is "Your daily system".
+**Routine** is a personal daily-system app for tracking habits, scheduled events, all-day tasks, and deadlines — backed by Postgres. The name shown everywhere in the app is "Routine". The tagline is "Your daily system".
 
 It is installed as a Progressive Web App and is designed primarily for mobile, with a desktop layout on larger screens.
 
 ### Who it's for
 
 - A **single user** (one person's data, gated by a passphrase)
-- Someone who already uses Notion and wants their habit/routine data to live in their workspace rather than a proprietary silo
+- Someone who wants a private, fast, self-hosted routine system
 - Mobile-first: most use happens on a phone, during the day
 
 ### Core jobs-to-be-done
@@ -32,7 +32,7 @@ It is installed as a Progressive Web App and is designed primarily for mobile, w
 - Progressive Web App (installable, standalone mode, portrait orientation)
 - Mobile-first responsive design (breakpoint at `lg` / 1024px switches layout)
 - Passphrase authentication, rate-limited
-- Offline-ish: data lives in Notion, all reads and writes hit Notion's API via server actions. Not currently offline-first, but snappy because writes are optimistic
+- Offline-ish: data lives in Postgres, all reads and writes go through server actions. Not currently offline-first, but snappy because writes are optimistic
 
 ---
 
@@ -132,7 +132,7 @@ A record that a habit was done (or a progress value was logged) on a given date.
 
 ### 4.1 `/unlock` — Passphrase gate
 
-**Purpose.** Keeps a single user's Notion-backed data private. First screen you hit if you aren't authenticated.
+**Purpose.** Keeps a single user's routine data private. First screen you hit if you aren't authenticated.
 
 `[screenshot: unlock page]`
 
@@ -299,14 +299,12 @@ When expanded, shows a week grid:
 
 ### 4.4 `/settings` — Preferences & habit management
 
-**Purpose.** User preferences, pausing/reordering habits, and links into the Notion workspace for data export.
+**Purpose.** User preferences, pausing/reordering habits, and database-backed data controls.
 
 `[screenshot: settings page]`
 `[screenshot: settings page — habits section with reorder buttons]`
 
 **Header (sticky).** Title: **"Settings"** in Fraunces serif (28px, normal weight).
-
-**Info banner (conditional).** If the Notion Settings DB isn't configured, an amber/yellow tip banner appears at the top explaining how to add the `NOTION_SETTINGS_DB_ID` env var so preferences can persist in-app.
 
 **Section: PREFERENCES** (eyebrow heading).
 
@@ -334,15 +332,12 @@ All preference rows use a two-column layout: label left, control right.
   - **"Pause"** / **"Resume"** toggle button
 - Empty state: **"No habits yet. Add your first one!"**
 
-**Section: DATA & EXPORT** (eyebrow heading).
+**Section: DATA** (eyebrow heading).
 
-- Short paragraph of muted body text
-- **ExternalLink rows** — full-width bordered buttons: emoji + label (flex) + `↗` arrow. One per Notion database:
-  - 📋 **"Open Habits in Notion"**
-  - 📅 **"Open Events in Notion"**
-- Fallback text if URLs unavailable: **"Open notion.so and find your Routine databases."**
+- Short paragraph of muted body text.
+- Copy explains that preferences and history are stored in Postgres and can be backed up from the database.
 
-**Footer.** Centered muted text: *"Powered by Notion"*, separated by a top border.
+**Footer.** Centered muted text: *"Powered by Postgres"*, separated by a top border.
 
 ---
 
@@ -536,7 +531,7 @@ Primary button: **"Add Deadline"**.
   - ⚙️ Settings
   - Active: light blue background + accent text color
   - Inactive: muted foreground, hover raises to `bg-muted`
-- **Bottom (footer):** small muted text **"Powered by Notion"**
+- **Bottom (footer):** small muted text **"Powered by Postgres"**
 
 ---
 
@@ -603,7 +598,7 @@ Primary button: **"Add Deadline"**.
 1. User taps the circular checkbox on a card.
 2. It immediately fills green with a white checkmark (optimistic).
 3. Title gets strikethrough + dimmed.
-4. A server action writes to Notion in the background. Toggles use Next.js `after()` so the UI isn't blocked waiting on Notion.
+4. A server action writes to Postgres and revalidates the affected route.
 5. Weekly counts in the "This Week" grid and the header progress indicator update.
 6. If the habit hit its weekly target, it moves into the "Weekly goals met ✓" section.
 
@@ -807,7 +802,6 @@ From `public/manifest.json`:
 | Calendar day with no events | "No events on this day." |
 | Schedule view | "No upcoming events through June 30." |
 | Settings habits list | "No habits yet. Add your first one!" |
-| Settings without Notion configured | Amber tip banner explaining how to configure `NOTION_SETTINGS_DB_ID` |
 
 ### 10.2 Loading / pending
 
@@ -842,13 +836,13 @@ Areas where the current design has obvious room to move, which the designer may 
 7. **Widget-like surfacing.** Since this is a PWA, there's no native home-screen widget. Should the Today page itself be designed with glanceability in mind?
 8. **Information hierarchy on Today.** 5 time-of-day sections + "Weekly goals met" + "This Week" is a lot of vertical scanning. Is there a more scannable layout?
 9. **Brand & personality.** Currently "Routine" is a utilitarian name with a utilitarian tagline. Is there a stronger identity worth pursuing?
-10. **Constraints to respect.** Notion is the backend — all items need to persist there. Single-user. PWA-first. Everything else is fair game.
+10. **Constraints to respect.** Postgres is the backend — all items need to persist there. Single-user. PWA-first. Everything else is fair game.
 
 ---
 
 ## Appendix: Tech constraints the designer should know about (but not be limited by)
 
-- **Backend:** Notion databases (Habits, Completions, Events, optional Settings). The user's data sovereignty is a feature — they can always open the Notion DB directly. A redesign shouldn't pretend the data lives somewhere else.
+- **Backend:** Postgres tables for habits, completions, events, settings, groups, skips, vacations, and allowed devices. The user's data sovereignty is a feature — the app should keep its storage model clear and backup-friendly.
 - **Single user.** No social features, no sharing, no multi-user concerns.
 - **PWA, not native.** No OS-level widgets, notifications are limited (no rich push), no background sync.
 - **Stack:** Next.js 16 App Router, React 19, Tailwind 4, shadcn/ui + Base UI primitives. Any redesign can be implemented with these — but the designer shouldn't feel constrained to shadcn's look.

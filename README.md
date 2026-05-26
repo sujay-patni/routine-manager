@@ -1,12 +1,12 @@
 # Routine
 
-Routine is a personal daily-system web app for managing habits, events, tasks, deadlines, and tracked progress from your own Notion workspace.
+Routine is a personal daily-system web app for managing habits, events, tasks, deadlines, and tracked progress from Postgres.
 
-It is built for one person, works well on mobile, installs as a PWA, and keeps the source of truth in Notion instead of locking your routine data inside a proprietary database.
+It is built for one person, works well on mobile, installs as a PWA, and uses a regular database so day-to-day operations stay fast and reliable.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=111)
-![Notion](https://img.shields.io/badge/Storage-Notion-black?logo=notion)
+![Postgres](https://img.shields.io/badge/Storage-Postgres-336791?logo=postgresql&logoColor=white)
 ![PWA](https://img.shields.io/badge/PWA-ready-5a0fc8)
 [![CI](https://github.com/sujay-patni/routine-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/sujay-patni/routine-manager/actions/workflows/ci.yml)
 
@@ -83,7 +83,7 @@ You can configure:
 - Deadline surface window
 - Day start hour
 - Progress units
-- Notion export links
+- Database-backed preferences and history
 
 Settings also links to:
 
@@ -124,7 +124,7 @@ The Vacations settings subpage lets you:
 
 ## Data Model
 
-Routine stores data in Notion databases. The app expects these core entities:
+Routine stores data in Postgres tables. The app expects these core entities:
 
 - Habits: repeating routines.
 - Completions: records of habit completions and progress logs.
@@ -141,7 +141,8 @@ Routine stores data in Notion databases. The app expects these core entities:
 - TypeScript
 - Tailwind CSS
 - shadcn-style UI primitives
-- Notion API
+- Neon Postgres
+- Drizzle ORM and Drizzle Kit
 - Serwist service worker for PWA support
 - date-fns and date-fns-tz for date logic
 - rrule for recurring events
@@ -150,11 +151,30 @@ Routine stores data in Notion databases. The app expects these core entities:
 
 - Node.js `20.9.0` or newer
 - npm
-- A Notion account
-- A Notion integration token
-- Notion databases for the app data
+- A Postgres database URL. Neon Free works well for a Vercel-hosted personal deployment.
+- A deployment target. The documented path uses Vercel, but any host that can run Next.js with environment variables should work.
 
 > Next.js 16 will not build or run correctly on older Node versions. This repo includes `.nvmrc` and the local npm scripts will automatically use an installed nvm Node 20+ when your active shell is older.
+
+## Quick Start
+
+```bash
+git clone https://github.com/sujay-patni/routine-manager.git
+cd routine-manager
+npm install
+cp .env.example .env.local
+```
+
+Fill in `DATABASE_URL`, `APP_PASSPHRASE`, and `COOKIE_SECRET`, then run:
+
+```bash
+npm run db:migrate
+npm run db:seed
+npm run db:verify
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000), unlock with `APP_PASSPHRASE`, and create your first habits, groups, events, tasks, or vacations from the app UI.
 
 ## Local Setup
 
@@ -171,18 +191,26 @@ cd routine-manager
 npm install
 ```
 
-### 3. Create a Notion Integration
+### 3. Create a Postgres Database
 
-1. Go to [https://www.notion.so/my-integrations](https://www.notion.so/my-integrations).
-2. Create a new internal integration.
-3. Copy the integration secret.
-4. Share every Routine database with this integration.
+Create a Neon Postgres database and copy its pooled connection string.
 
-The integration needs access to read, create, update, and archive pages in the databases you use.
+Recommended Neon settings:
+
+- Start with the free plan for a personal deployment.
+- Use the default database or create one named `routine_manager`.
+- Copy the pooled connection string from the Neon dashboard's connection panel.
+- Keep `sslmode=require` in the connection string.
+
+The connection string should look like:
+
+```text
+postgresql://user:password@host/db?sslmode=require
+```
 
 ### 4. Create `.env.local`
 
-Copy the example environment file and fill in your own Notion database IDs and secrets:
+Copy the example environment file and fill in your database and app secrets:
 
 ```bash
 cp .env.example .env.local
@@ -191,17 +219,7 @@ cp .env.example .env.local
 The file should contain values like these:
 
 ```bash
-NOTION_API_KEY=secret_xxx
-
-NOTION_HABITS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-NOTION_COMPLETIONS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-NOTION_EVENTS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Optional but recommended
-NOTION_SETTINGS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-NOTION_GROUPS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-NOTION_SKIPS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-NOTION_VACATIONS_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DATABASE_URL=postgresql://user:password@host/db?sslmode=require
 
 APP_PASSPHRASE=choose-a-private-passphrase
 COOKIE_SECRET=generate-a-long-random-secret
@@ -209,14 +227,12 @@ COOKIE_SECRET=generate-a-long-random-secret
 # Optional — required only if you use the Health Connect webhook
 HEALTH_WEBHOOK_SECRET=generate-another-long-random-secret
 
-# Used only when NOTION_SETTINGS_DB_ID is missing
+# Optional app defaults used before a settings row exists
 TIMEZONE=Asia/Kolkata
 WEEK_START_DAY=1
 DEADLINE_SURFACE_DAYS=3
 DAY_START_HOUR=0
 ```
-
-Database IDs can be copied from Notion database URLs. They are the long identifier in the URL. Dashes are fine.
 
 Generate a cookie secret with:
 
@@ -224,7 +240,43 @@ Generate a cookie secret with:
 openssl rand -base64 32
 ```
 
-### 5. Run the App
+### Environment Variables
+
+| Variable | Required | Where | Notes |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | Local and deployment | Postgres connection string. Neon pooled URLs work well on Vercel. |
+| `APP_PASSPHRASE` | Yes | Local and deployment | Passphrase used to unlock the private app. |
+| `COOKIE_SECRET` | Yes | Local and deployment | Long random string used to sign the auth cookie. |
+| `HEALTH_WEBHOOK_SECRET` | Only for Health Connect | Local and deployment | Bearer token for `/api/health/webhook`. |
+| `TIMEZONE` | Optional | Local and deployment | Default used before the settings row exists. Defaults to `Asia/Kolkata`. |
+| `WEEK_START_DAY` | Optional | Local and deployment | `1` for Monday, `0` for Sunday. |
+| `DEADLINE_SURFACE_DAYS` | Optional | Local and deployment | Default number of days before deadlines appear. |
+| `DAY_START_HOUR` | Optional | Local and deployment | Logical day boundary, `0` to `23`. |
+| `HEALTH_WEBHOOK_DEBUG` | Optional | Local only | Set to `1` for sanitized webhook debug logging. |
+
+### 5. Run Migrations
+
+```bash
+npm run db:migrate
+```
+
+### 6. Verify the Database
+
+Seed the default settings row first:
+
+```bash
+npm run db:seed
+```
+
+Then verify:
+
+```bash
+npm run db:verify
+```
+
+For a fresh database, this command should show zero rows for most tables and one settings row. For an existing database, it prints current table counts and fails if duplicate-sensitive records are invalid.
+
+### 7. Run the App
 
 ```bash
 npm run dev
@@ -232,134 +284,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-The repo has `.nvmrc` set to Node 20. If your shell is still on Node 18 but Node 20 is installed through nvm, the `dev`, `build`, and `start` npm scripts automatically run Next.js with the compatible installed Node version.
+The repo has `.nvmrc` set to Node 20. If your shell is still on Node 18 but Node 20 is installed through nvm, the npm scripts automatically run tools with the compatible installed Node version.
 
-### 6. Unlock
+### 8. Unlock
 
 Enter the value from `APP_PASSPHRASE`. The app stores a signed HTTP-only cookie for 30 days.
-
-## Notion Database Setup
-
-Property names matter. Create the databases below and use the exact property names.
-
-### Habits Database
-
-Required environment variable: `NOTION_HABITS_DB_ID`
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Name` | Title | Habit name |
-| `Description` | Rich text | Optional notes |
-| `Frequency` | Select | `daily`, `weekly`, `specific_days_weekly`, `specific_dates_monthly`, `specific_dates_yearly` |
-| `Weekly Target` | Number | Used for weekly habits |
-| `Color` | Select | Legacy/display fallback |
-| `Icon` | Rich text | Legacy/display fallback |
-| `Active` | Checkbox | Paused habits are inactive |
-| `Time of Day` | Select | `morning`, `afternoon`, `evening`, `night` |
-| `Exact Time` | Rich text | `HH:MM` format |
-| `Specific Days` | Rich text | Weekly days, monthly dates, or yearly dates |
-| `Progress Metric` | Rich text | Unit such as `steps`, `mins`, `hrs`, `pages` |
-| `Progress Target` | Number | Target value |
-| `Progress Start` | Number | Optional baseline |
-| `Progress Period` | Select | `daily`, `weekly`, `monthly`, `yearly` |
-| `Progress Conversion` | Number | Minutes per unit for non-time progress |
-| `Progress Conversion Base` | Number | Optional conversion base |
-| `Duration` | Number | Default expected minutes |
-| `Sort Order` | Number | Used for manual ordering |
-| `Group` | Relation | Relation to Groups database |
-| `Health Source` | Select | Optional. `steps`, `sleep_minutes`, `distance_meters`, or `active_calories`. Auto-fills the habit's Completions from a Health Connect webhook. Leave unset for manual habits. |
-
-### Completions Database
-
-Required environment variable: `NOTION_COMPLETIONS_DB_ID`
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Title` | Title | Generated from habit and date |
-| `Habit` | Relation | Relation to Habits database |
-| `Date` | Date | Completion date |
-| `Note` | Rich text | Optional |
-| `Progress Value` | Number | Logged progress value |
-| `Duration Actual` | Number | Actual minutes spent |
-
-### Events Database
-
-Required environment variable: `NOTION_EVENTS_DB_ID`
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Title` | Title | Event/task/deadline title |
-| `Description` | Rich text | Optional notes |
-| `Type` | Select | `timed`, `all_day`, `deadline` |
-| `Start Time` | Date | Timed events |
-| `End Time` | Date | Optional timed event end |
-| `Due Date` | Date | Tasks and deadlines |
-| `Recurring` | Checkbox | Enables recurrence |
-| `Recurrence Rule` | Rich text | RRULE text |
-| `Surface Days` | Number | Days before deadline appears |
-| `Completed` | Checkbox | Completion state |
-| `Time of Day` | Select | `morning`, `afternoon`, `evening`, `night` |
-| `Due Time` | Rich text | `HH:MM` for tasks/deadlines |
-| `Group` | Relation | Relation to Groups database |
-| `Duration` | Number | Default expected minutes |
-| `Duration Actual` | Number | Actual minutes logged |
-
-### Settings Database
-
-Optional but recommended environment variable: `NOTION_SETTINGS_DB_ID`
-
-If this database is not configured, Routine falls back to environment variables for settings. In-app settings changes will not persist across deploys unless this database exists.
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Title` | Title | Use something like `App Settings` |
-| `Timezone` | Rich text | IANA timezone, e.g. `Asia/Kolkata` |
-| `Week Start Day` | Number | `1` for Monday, `0` for Sunday |
-| `Deadline Surface Days` | Number | Default deadline lookahead |
-| `Day Start Hour` | Number | `0` to `23` |
-| `Progress Units` | Rich text | Comma-separated custom units; `mins` and `hrs` are always included |
-
-### Groups Database
-
-Optional environment variable: `NOTION_GROUPS_DB_ID`
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Name` | Title | Group name |
-| `Color` | Rich text | Hex color, e.g. `#8b5cf6` |
-| `Sort Order` | Number | Optional ordering |
-
-### Skips Database
-
-Optional environment variable: `NOTION_SKIPS_DB_ID`
-
-Without this database, skipping is disabled or unavailable for persisted skip history.
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Title` | Title | Item title |
-| `Item Type` | Select | `habit` or `event` |
-| `Item ID` | Rich text | Notion page ID of skipped item |
-| `Scope` | Select | `day` or `week` |
-| `Date` | Date | Skip date |
-| `Week Start` | Date | For weekly skips |
-| `Week End` | Date | For weekly skips |
-
-### Vacations Database
-
-Optional but recommended environment variable: `NOTION_VACATIONS_DB_ID`
-
-Without this database, Vacation mode is unavailable and paused-habit history cannot be stored.
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `Title` | Title | Vacation or preset name |
-| `Is Template` | Checkbox | Checked rows are reusable presets |
-| `Start Date` | Date | Vacation start date; blank for presets |
-| `End Date` | Date | Vacation end date; blank for presets |
-| `Habit IDs` | Rich text | Comma-separated Notion habit page IDs |
-| `Group IDs` | Rich text | Comma-separated Notion group page IDs |
-| `Note` | Rich text | Optional notes |
 
 ## Frequency and Date Formats
 
@@ -420,7 +349,7 @@ Grab the latest signed-debug APK directly from the fork's [GitHub Releases page]
 
 ### Setup
 
-1. Add a `Health Source` Select property to your Habits database with options `none`, `steps`, `sleep_minutes`, `distance_meters`, `active_calories`. Set a default of `none` if you want new habits to opt out by default.
+1. Set `Health Source` on each auto-fed habit to one of `steps`, `sleep_minutes`, `distance_meters`, or `active_calories`.
 2. Set the property on each habit you want auto-fed. For example, a `Daily steps` habit with `Progress Metric=steps` and `Progress Target=10000` would have `Health Source=steps`.
 3. Set `HEALTH_WEBHOOK_SECRET` to a long random string in your environment (`openssl rand -base64 32`).
 4. Install the [fork's APK](https://github.com/sujay-patni/health-connect-webhook/releases) on your phone, grant it Health Connect read permission for the data types you want.
@@ -483,6 +412,17 @@ npm run dev
 # Lint
 npm run lint
 
+# Typecheck
+npm run typecheck
+
+# Generate and apply database migrations
+npm run db:generate
+npm run db:migrate
+
+# Seed defaults and verify table counts/duplicate-sensitive rows
+npm run db:seed
+npm run db:verify
+
 # Production build
 npm run build
 
@@ -498,15 +438,18 @@ The app works well on Vercel.
 
 1. Push this repository to GitHub.
 2. Import it into Vercel.
-3. Add all required environment variables in Vercel Project Settings.
-4. Deploy.
-5. Open the deployment URL and unlock with `APP_PASSPHRASE`.
+3. Add `DATABASE_URL`, `APP_PASSPHRASE`, `COOKIE_SECRET`, and any webhook/default env vars in Vercel Project Settings.
+4. Run `npm run db:migrate` locally against the production database URL, or from a trusted CI/deploy environment that has `DATABASE_URL`.
+5. Run `npm run db:seed` and `npm run db:verify` against the same database.
+6. Deploy.
+7. Open the deployment URL and unlock with `APP_PASSPHRASE`.
+8. Create your first data from the UI, or restore data from your own Postgres backup.
 
-Make sure your Notion integration has access to every database you configured.
+For a fuller rebuild checklist, see [docs/REPLICATION.md](docs/REPLICATION.md).
 
 ## Security and Privacy
 
-Routine is intended for self-hosting with your own Notion workspace. Do not commit `.env.local`, Notion integration tokens, passphrases, cookie secrets, or database IDs from a private workspace.
+Routine is intended for self-hosting with your own database. Do not commit `.env.local`, database URLs, passphrases, cookie secrets, or private database identifiers.
 
 The passphrase gate is useful for a personal deployment, but it is not a full multi-user authentication system. If you expose the app beyond your own use, put it behind your hosting provider's access controls or add a real auth provider.
 
@@ -531,30 +474,22 @@ nvm install
 nvm use
 ```
 
-### Notion returns missing property errors
+### Database migrations fail
 
-Check that the database property names exactly match the tables above. Notion property names are case-sensitive.
+Confirm `DATABASE_URL` is set, points at Postgres, and includes SSL settings required by your provider.
 
 ### Data does not appear
 
 Confirm:
 
-- The correct database IDs are in `.env.local`.
-- The Notion integration has been shared with each database.
-- `NOTION_API_KEY` is valid.
+- `DATABASE_URL` is correct in `.env.local` or your deployment environment.
+- `npm run db:migrate` has been run.
+- `npm run db:verify` passes.
 - The item is active and scheduled for the selected date.
 
-### Settings do not persist
+### Device allowlist does not work
 
-Add `NOTION_SETTINGS_DB_ID` and create the Settings database. Without it, settings fall back to environment variables.
-
-### Groups or skips do not work
-
-Create the optional Groups or Skips database and set `NOTION_GROUPS_DB_ID` or `NOTION_SKIPS_DB_ID`.
-
-### Vacation mode does not work
-
-Create the optional Vacations database and set `NOTION_VACATIONS_DB_ID`. Share the database with the same Notion integration as the other databases.
+Add active rows to the `allowed_devices` table. If the table has no active rows, Routine allows all devices to avoid locking you out.
 
 ## Project Structure
 
@@ -568,18 +503,21 @@ app/
   unlock/              Passphrase screen
 
 components/            Shared cards, sheets, navigation, and UI primitives
+drizzle/               Generated SQL migrations and Drizzle metadata
 lib/
-  notion/              Notion API mappers and database helpers
+  db/                  Drizzle schema, client, and Postgres repositories
+  domain/              Shared app/domain types
   habit-logic.ts       Scheduling and progress logic
   auth.ts              Passphrase cookie helpers
 public/                Manifest, icons, service worker output
+scripts/               Runtime helpers and database verification scripts
 ```
 
 ## Notes for Forking
 
 This repository is intentionally personal-first. If you fork it, expect to customize:
 
-- Notion schema/views
+- Database schema/defaults
 - PWA icons
 - Default timezone
 - Theme and styling
@@ -596,6 +534,7 @@ Issues and small pull requests are welcome. Please keep changes focused, include
 
 ```bash
 npm run lint
+npm run typecheck
 npm run build
 ```
 
