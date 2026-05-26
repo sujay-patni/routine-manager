@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCookieName, verifyCookie } from "@/lib/auth";
-import { isDeviceAllowed } from "@/lib/notion/devices";
+import { isDeviceAllowed } from "@/lib/db/devices";
 
 export default async function BlockedPage() {
   const cookieStore = await cookies();
@@ -34,8 +34,8 @@ export default async function BlockedPage() {
               {deviceId}
             </code>
             <p className="text-xs text-muted-foreground">
-              Add this ID to the <strong>Allowed Devices</strong> database in Notion with{" "}
-              <strong>Active</strong> checked, then refresh this page.
+              Add this ID to the <strong>allowed_devices</strong> table with <strong>is_active</strong>{" "}
+              enabled, then refresh this page.
             </p>
           </div>
         )}

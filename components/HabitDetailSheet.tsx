@@ -3,7 +3,7 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { Habit } from "@/lib/notion/types";
+import type { Habit } from "@/lib/domain/types";
 import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface HabitDetailSheetProps {

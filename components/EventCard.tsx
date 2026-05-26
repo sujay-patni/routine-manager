@@ -6,7 +6,7 @@ import type { TodayEvent } from "@/app/actions/events";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useSwipeReveal } from "@/lib/useSwipeReveal";
-import type { Group } from "@/lib/notion/types";
+import type { Group } from "@/lib/domain/types";
 
 interface EventCardProps {
   event: TodayEvent;

@@ -13,7 +13,7 @@ import { parseZonedOrLocal } from "@/lib/habit-logic";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import AddItemSheet from "@/components/AddItemSheet";
 import EditEventSheet from "@/components/EditEventSheet";
-import type { AppEvent, Group } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/domain/types";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/components/SettingsProvider";
 import GroupFilterBar from "@/components/GroupFilterBar";

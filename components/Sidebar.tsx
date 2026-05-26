@@ -54,7 +54,7 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-5 py-4 border-t">
-        <p className="text-xs text-muted-foreground">Powered by Notion</p>
+        <p className="text-xs text-muted-foreground">Powered by Postgres</p>
       </div>
     </aside>
   );

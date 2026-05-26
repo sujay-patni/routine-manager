@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updateHabit, deleteHabit } from "@/app/actions/habits";
-import type { Habit, HabitFrequency, Group } from "@/lib/notion/types";
+import type { Habit, HabitFrequency, Group, HealthSource } from "@/lib/domain/types";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,14 @@ const DAYS_OF_WEEK = [
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
+];
+
+const HEALTH_SOURCE_OPTIONS: Array<{ value: HealthSource | "none"; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "steps", label: "Steps" },
+  { value: "sleep_minutes", label: "Sleep minutes" },
+  { value: "distance_meters", label: "Distance meters" },
+  { value: "active_calories", label: "Active calories" },
 ];
 
 export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabit, onSaved, groups = [] }: EditHabitSheetProps) {
@@ -94,6 +102,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
   const [progressPeriod, setProgressPeriod] = useState<"daily" | "weekly" | "monthly" | "yearly">(
     (habit?.progress_period as "daily" | "weekly" | "monthly" | "yearly") ?? "daily"
   );
+  const [healthSource, setHealthSource] = useState<HealthSource | "none">(habit?.health_source ?? "none");
 
   // Timing fields
   const [showExact, setShowExact] = useState(!!habit?.exact_time);
@@ -136,6 +145,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     setTarget(String(h?.progress_target ?? ""));
     setStart(String(h?.progress_start ?? 0));
     setProgressPeriod((h?.progress_period as "daily" | "weekly" | "monthly" | "yearly") ?? "daily");
+    setHealthSource(h?.health_source ?? "none");
     setShowExact(!!h?.exact_time);
     setTimeOfDay(h?.time_of_day ?? "");
     setExactTime(h?.exact_time ?? "");
@@ -210,6 +220,7 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
       progress_period: progressOn ? progressPeriod : null,
       progress_conversion: conversionVal && !isNaN(conversionVal) ? conversionVal : null,
       progress_conversion_base: progressOn && !isTimeUnit(metric) ? cLeft : null,
+      health_source: progressOn && healthSource !== "none" ? healthSource : null,
       duration_minutes: duration ? Number(duration) : null,
       time_of_day: showExact ? null : (timeOfDay as Habit["time_of_day"]) || null,
       exact_time: showExact ? exactTime || null : null,
@@ -332,6 +343,17 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
                     <SelectItem value="weekly">Weekly (Mon–Sun)</SelectItem>
                     <SelectItem value="monthly">Monthly (1st of month)</SelectItem>
                     <SelectItem value="yearly">Yearly (Jan 1)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Health source</Label>
+                <Select value={healthSource} onValueChange={v => v && setHealthSource(v as HealthSource | "none")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {HEALTH_SOURCE_OPTIONS.map((source) => (
+                      <SelectItem key={source.value} value={source.value}>{source.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

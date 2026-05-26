@@ -9,7 +9,7 @@ import {
   subDays,
 } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
-import type { Habit } from "./notion/types";
+import type { Habit } from "./domain/types";
 
 export type HabitState = "done" | "satisfied" | "skipped" | "urgent" | "pending" | "optional";
 

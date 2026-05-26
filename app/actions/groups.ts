@@ -2,16 +2,16 @@
 
 import { revalidateTag, unstable_cache } from "next/cache";
 import {
-  getAllGroups as notionGetAllGroups,
-  createGroup as notionCreateGroup,
-  updateGroup as notionUpdateGroup,
-  deleteGroup as notionDeleteGroup,
-} from "@/lib/notion/groups";
-import type { Group } from "@/lib/notion/types";
+  getAllGroups as dbGetAllGroups,
+  createGroup as dbCreateGroup,
+  updateGroup as dbUpdateGroup,
+  deleteGroup as dbDeleteGroup,
+} from "@/lib/db/groups";
+import type { Group } from "@/lib/domain/types";
 
 export type { Group };
 
-const cachedGetAllGroups = unstable_cache(notionGetAllGroups, ["groups-all"], {
+const cachedGetAllGroups = unstable_cache(dbGetAllGroups, ["groups-all"], {
   tags: ["groups"],
   revalidate: 300,
 });
@@ -22,7 +22,7 @@ export async function getAllGroups(): Promise<Group[]> {
 
 export async function createGroup(data: { name: string; color: string }) {
   try {
-    const group = await notionCreateGroup(data);
+    const group = await dbCreateGroup(data);
     revalidateTag("groups", {});
     return { success: true, group };
   } catch (e) {
@@ -32,7 +32,7 @@ export async function createGroup(data: { name: string; color: string }) {
 
 export async function updateGroup(id: string, data: { name?: string; color?: string }) {
   try {
-    await notionUpdateGroup(id, data);
+    await dbUpdateGroup(id, data);
     revalidateTag("groups", {});
     return { success: true };
   } catch (e) {
@@ -42,7 +42,7 @@ export async function updateGroup(id: string, data: { name?: string; color?: str
 
 export async function deleteGroup(id: string) {
   try {
-    await notionDeleteGroup(id);
+    await dbDeleteGroup(id);
     revalidateTag("groups", {});
     revalidateTag("habits", {});
     revalidateTag("events", {});

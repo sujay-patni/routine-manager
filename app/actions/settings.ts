@@ -5,8 +5,8 @@ import {
   getAppSettings,
   createAppSettings,
   updateAppSettings,
-} from "@/lib/notion/settings";
-import type { AppSettings } from "@/lib/notion/types";
+} from "@/lib/db/settings";
+import type { AppSettings } from "@/lib/domain/types";
 
 export type { AppSettings };
 
@@ -23,8 +23,9 @@ function getEnvSettings(): AppSettings {
 
 const getCachedSettings = unstable_cache(
   async (): Promise<AppSettings> => {
-    const notionSettings = await getAppSettings();
-    return notionSettings ?? getEnvSettings();
+    if (!process.env.DATABASE_URL?.trim()) return getEnvSettings();
+    const dbSettings = await getAppSettings();
+    return dbSettings ?? getEnvSettings();
   },
   ["app-settings"],
   { revalidate: 300, tags: ["app-settings"] }
@@ -41,9 +42,6 @@ export async function saveSettings(data: {
   day_start_hour: number;
   progress_units?: string[];
 }) {
-  if (!process.env.NOTION_SETTINGS_DB_ID) {
-    return { error: "no_settings_db" };
-  }
   try {
     const existing = await getAppSettings();
     if (existing) {

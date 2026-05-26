@@ -14,7 +14,7 @@ import { skipHabit, unskipHabit } from "@/app/actions/habits";
 import { skipEvent, unskipEvent } from "@/app/actions/events";
 import { isHabitScheduledForDay, type ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
-import type { AppEvent, Group } from "@/lib/notion/types";
+import type { AppEvent, Group } from "@/lib/domain/types";
 import { format, addDays, subDays, parseISO, eachDayOfInterval, isBefore, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import GroupFilterBar from "@/components/GroupFilterBar";
@@ -601,7 +601,7 @@ export default function TodayClient({
 
         {syncWarnings.length > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-[11.5px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-300">
-            <p className="font-medium">Notion sync needs attention</p>
+            <p className="font-medium">Data sync needs attention</p>
             {syncWarnings.map((message) => (
               <p key={message}>{message}</p>
             ))}

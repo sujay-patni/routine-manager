@@ -10,12 +10,12 @@ import {
   getVacationTemplates,
   updateVacation,
   type VacationInput,
-} from "@/lib/notion/vacations";
+} from "@/lib/db/vacations";
 import { formatDateForDB } from "@/lib/habit-logic";
 import { subDays } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { getSettings } from "@/app/actions/settings";
-import type { Vacation } from "@/lib/notion/types";
+import type { Vacation } from "@/lib/domain/types";
 
 export type { Vacation };
 

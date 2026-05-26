@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { AppEvent } from "@/lib/notion/types";
+import type { AppEvent } from "@/lib/domain/types";
 import { useIsMobile } from "@/lib/useMediaQuery";
 
 interface EventDetailSheetProps {

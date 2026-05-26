@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { createGroup, updateGroup, deleteGroup } from "@/app/actions/groups";
 import { GROUP_PALETTE, DEFAULT_GROUP_COLOR } from "@/lib/groups-palette";
-import type { Group, Habit, AppEvent } from "@/lib/notion/types";
+import type { Group, Habit, AppEvent } from "@/lib/domain/types";
 
 interface Props {
   groups: Group[];
