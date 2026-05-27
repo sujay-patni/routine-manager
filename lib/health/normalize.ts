@@ -3,10 +3,11 @@ import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { NormalizedRecord, WebhookPayload } from "./types";
 
 /** Records spanning at least this many minutes are treated as daily-aggregate
- *  totals (e.g. Samsung Health's 24h "Combined" StepsRecord). They overwrite
- *  bout-level sums for the same logical day, since the aggregate is the
- *  authoritative merged count from the source. Real activity bouts top out
- *  around 10 minutes, so 22h is far above the noise. */
+ *  totals (e.g. Samsung Health's 24h "Combined" StepsRecord). For the same
+ *  logical day we take max(aggregate, boutSum): the aggregate is usually the
+ *  de-duped merged count from the source, but bouts can be higher when the
+ *  aggregate is stale or missing the latest activity. Real activity bouts top
+ *  out around 10 minutes, so 22h is far above the noise. */
 const AGGREGATE_MIN_MINUTES = 22 * 60;
 
 /** Convert an ISO timestamp to the logical day key (YYYY-MM-DD), shifted by
@@ -114,10 +115,12 @@ export function parseWebhookPayload(
     const aggCount = stepsAggregateCounts.get(dayKey);
     const bouts = stepsBouts.get(dayKey);
     if (!isSafeToWrite(dayKey, aggCount !== undefined)) continue;
+    const boutCount = bouts?.progressValue;
+    const progressValue = Math.max(aggCount ?? 0, boutCount ?? 0);
     out.push({
       source: "steps",
       dayKey,
-      progressValue: aggCount ?? bouts?.progressValue ?? 0,
+      progressValue,
       durationMinutes: bouts?.durationMinutes,
     });
   }
