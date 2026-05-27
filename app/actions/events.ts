@@ -58,13 +58,17 @@ function getRecurrenceInstance(event: AppEvent, targetDate: Date, timezone: stri
 
 export async function getTodayEvents(dateStr?: string): Promise<TodayEvent[]> {
   const settings = await getSettings();
-  const { timezone, deadline_surface_days: defaultSurfaceDays } = settings;
+  const {
+    timezone,
+    deadline_surface_days: defaultSurfaceDays,
+    day_start_hour: dayStartHour,
+  } = settings;
 
   let targetDate: Date;
   if (dateStr) {
     targetDate = parseZonedOrLocal(dateStr, timezone);
   } else {
-    const { today } = getWeekBoundaries(timezone);
+    const { today } = getWeekBoundaries(timezone, settings.week_start_day, dayStartHour);
     targetDate = today;
   }
   const todayStr = formatDateForDB(targetDate);
