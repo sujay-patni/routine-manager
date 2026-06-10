@@ -16,7 +16,8 @@ import { isHabitScheduledForDay, type ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
 import type { AppEvent, Group } from "@/lib/domain/types";
 import { format, addDays, subDays, parseISO, eachDayOfInterval, isBefore, startOfDay } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn, friendlyError } from "@/lib/utils";
+import { toast } from "sonner";
 import GroupFilterBar from "@/components/GroupFilterBar";
 import { useMemo } from "react";
 
@@ -210,13 +211,27 @@ export default function TodayClient({
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flushPendingWrites = useCallback(async () => {
-    const entries = [...pendingWrites.current.values()];
+    const entries = [...pendingWrites.current.entries()];
     pendingWrites.current.clear();
     flushTimerRef.current = null;
     if (entries.length === 0) return;
     // Fire all queued writes in parallel, then resolve their transitions together.
-    await Promise.all(entries.map(e => e.serverFn()));
-    entries.forEach(e => e.resolve());
+    // Transitions must resolve even on failure so optimistic state rebases to server truth.
+    const results = await Promise.allSettled(entries.map(([, e]) => e.serverFn()));
+    entries.forEach(([, e]) => e.resolve());
+    const failedIds = entries.filter((_, i) => results[i].status === "rejected").map(([id]) => id);
+    if (failedIds.length > 0) {
+      // Drop overrides for failed writes so the checkboxes fall back to server state.
+      setDoneOverrides((prev) => {
+        const next = new Map(prev);
+        failedIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      toast.error(
+        failedIds.length === 1 ? "A habit couldn't be saved" : `${failedIds.length} habits couldn't be saved`,
+        { description: "Your changes were rolled back. Check your connection and try again." }
+      );
+    }
   }, []);
 
   // Flush any remaining writes when navigating away.
@@ -291,6 +306,7 @@ export default function TodayClient({
         setSkippedExpanded(true);
       } else if (result?.error) {
         console.error("Error skipping habit:", result.error);
+        toast.error("Couldn't skip habit", { description: friendlyError(result.error) });
       }
     });
   }
@@ -313,6 +329,7 @@ export default function TodayClient({
         });
       } else if (result?.error) {
         console.error("Error unskipping habit:", result.error);
+        toast.error("Couldn't unskip habit", { description: friendlyError(result.error) });
       }
     });
   }
@@ -337,6 +354,7 @@ export default function TodayClient({
         setSkippedExpanded(true);
       } else if (result?.error) {
         console.error("Error skipping event:", result.error);
+        toast.error("Couldn't skip event", { description: friendlyError(result.error) });
       }
     });
   }
@@ -357,6 +375,7 @@ export default function TodayClient({
         });
       } else if (result?.error) {
         console.error("Error unskipping event:", result.error);
+        toast.error("Couldn't unskip event", { description: friendlyError(result.error) });
       }
     });
   }
@@ -531,14 +550,14 @@ export default function TodayClient({
               <div className="flex gap-1">
                 <button
                   onClick={() => navigate("prev")}
-                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
                   aria-label="Previous day"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="15 18 9 12 15 6"/></svg>
                 </button>
                 <button
                   onClick={() => dateInputRef.current?.showPicker()}
-                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
                   aria-label="Pick a date"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -550,7 +569,7 @@ export default function TodayClient({
                 </button>
                 <button
                   onClick={() => navigate("next")}
-                  className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+                  className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted transition-colors text-muted-foreground"
                   aria-label="Next day"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="9 18 15 12 9 6"/></svg>
@@ -605,6 +624,12 @@ export default function TodayClient({
             {syncWarnings.map((message) => (
               <p key={message}>{message}</p>
             ))}
+            <button
+              onClick={() => router.refresh()}
+              className="mt-1.5 py-1 -my-1 font-semibold underline underline-offset-2"
+            >
+              Retry sync
+            </button>
           </div>
         )}
 
@@ -613,7 +638,7 @@ export default function TodayClient({
           <span>{hasDuration && plannedMins > 0 ? `⏱ ~${fmtMins(plannedMins)} planned` : "⏱ 0 mins planned"}</span>
           <button
             onClick={() => setDayLogOpen(true)}
-            className="text-primary font-medium hover:underline"
+            className="text-primary font-medium hover:underline py-1.5 -my-1.5 px-2 -mx-2"
           >
             Day Log →
           </button>
@@ -743,10 +768,10 @@ export default function TodayClient({
             const isCurrent = filter === "pending" && key === currentSectionKey;
             const plannedMinsForSection = sectionPlannedMins(key);
             const headerClass = filter === "completed"
-              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 flex items-center gap-1.5"
+              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/60 flex items-center gap-1.5"
               : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground flex items-center gap-1.5";
             const rangeClass = filter === "completed"
-              ? "text-[10.5px] text-muted-foreground/40 tracking-[.08em]"
+              ? "text-[10.5px] text-muted-foreground/60 tracking-[.08em]"
               : "text-[10.5px] text-muted-foreground tracking-[.08em]";
             return (
               <section key={`${key}-${filter}`}>
@@ -777,7 +802,7 @@ export default function TodayClient({
             const entries = buildAllDayEntries(filter);
             if (entries.length === 0) return null;
             const headerClass = filter === "completed"
-              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50"
+              ? "text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/60"
               : "text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground";
             const plannedMinsForAllDay = allDayPlannedMins();
             return (
@@ -799,7 +824,7 @@ export default function TodayClient({
             if (satisfiedHabits.length === 0) return null;
             return (
               <section>
-                <h2 className="text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/50 mb-2.5">Weekly goals met</h2>
+                <h2 className="text-[10.5px] font-medium tracking-[.16em] uppercase text-muted-foreground/60 mb-2.5">Weekly goals met</h2>
                 <div className="space-y-2">
                   {satisfiedHabits.map((h) => (
                     <HabitCard
@@ -841,6 +866,7 @@ export default function TodayClient({
                 <section className="border rounded-2xl bg-card card-elevated overflow-hidden">
                   <button
                     onClick={() => setCompletedExpanded((v) => !v)}
+                    aria-expanded={completedExpanded}
                     className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
                   >
                     <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground">Completed</span>
@@ -861,6 +887,7 @@ export default function TodayClient({
                 <section className="border rounded-2xl bg-card card-elevated overflow-hidden">
                   <button
                     onClick={() => setSkippedExpanded((v) => !v)}
+                    aria-expanded={skippedExpanded}
                     className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
                   >
                     <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground">Skipped</span>
@@ -892,6 +919,7 @@ export default function TodayClient({
           <section className="border rounded-2xl bg-card card-elevated overflow-hidden">
             <button
               onClick={() => setWeekExpanded((v) => !v)}
+              aria-expanded={weekExpanded}
               className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
             >
               <span className="text-[10.5px] font-semibold tracking-[.16em] uppercase text-muted-foreground">This Week</span>
@@ -899,13 +927,13 @@ export default function TodayClient({
             </button>
 
             {weekExpanded && (
-              <div className="px-4 pb-4 space-y-3 overflow-x-auto">
+              <div className="px-4 pb-4 space-y-4">
                 {/* Day header */}
-                <div className="grid gap-1 items-center min-w-[420px]" style={{ gridTemplateColumns: "minmax(100px,1fr) repeat(7, 1.75rem)" }}>
-                  <div />
+                <div className="grid grid-cols-7 gap-1">
                   {weekDays.map((d) => (
                     <div key={d.toISOString()} className="text-center text-xs text-muted-foreground font-medium">
-                      {format(d, "EEE")[0]}
+                      <span aria-hidden="true">{format(d, "EEE")[0]}</span>
+                      <span className="sr-only">{format(d, "EEEE")}</span>
                     </div>
                   ))}
                 </div>
@@ -915,8 +943,8 @@ export default function TodayClient({
                   const secHabits = habitsByWeekSection.get(sec) ?? [];
                   if (secHabits.length === 0) return null;
                   return (
-                    <div key={sec} className="space-y-2">
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide min-w-[420px]">
+                    <div key={sec} className="space-y-3">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
                         {WEEK_SECTION_LABELS[sec]}
                       </p>
                       {secHabits.map((habit) => {
@@ -927,22 +955,26 @@ export default function TodayClient({
                         const skippedSet = new Set(habit.skipped_dates ?? []);
                         const showDayStatus = habit.frequency !== "weekly";
                         return (
-                          <div key={habit.id} className="space-y-1 min-w-[420px]">
-                            <div className="grid gap-1 items-center" style={{ gridTemplateColumns: "minmax(100px,1fr) repeat(7, 1.75rem)" }}>
-                              <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                                <span className="text-xs font-medium">{habit.name}</span>
-                              </div>
+                          <div key={habit.id} className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-medium truncate">{habit.name}</span>
+                              <span className="text-xs text-muted-foreground flex-shrink-0">{done}/{target}</span>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1">
                               {weekDays.map((d) => {
                                 const dayStr = format(d, "yyyy-MM-dd");
                                 const completed = completedSet.has(dayStr);
                                 const skipped = skippedSet.has(dayStr);
                                 const scheduled = showDayStatus && isHabitScheduledForDay(habit, d);
                                 const missed = showDayStatus && scheduled && !completed && !skipped && isBefore(startOfDay(d), startOfDay(parsedDate));
+                                const status = completed ? "completed" : skipped ? "skipped" : missed ? "missed" : "not done";
                                 return (
                                   <div
                                     key={dayStr}
+                                    role="img"
+                                    aria-label={`${format(d, "EEE MMM d")}: ${status}`}
                                     className={cn(
-                                      "w-7 h-7 rounded-full flex items-center justify-center mx-auto",
+                                      "w-8 h-8 rounded-full flex items-center justify-center mx-auto",
                                       completed && "bg-primary text-primary-foreground",
                                       skipped && "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
                                       missed && "bg-muted text-muted-foreground",
@@ -968,11 +1000,8 @@ export default function TodayClient({
                                 );
                               })}
                             </div>
-                            <div className="flex items-center gap-2 min-w-[420px]">
-                              <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
-                                <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="text-xs text-muted-foreground flex-shrink-0 w-10 text-right">{done}/{target}</span>
+                            <div className="h-1 bg-muted rounded-full overflow-hidden" role="progressbar" aria-valuenow={done} aria-valuemax={target} aria-label={`${habit.name} weekly progress`}>
+                              <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
                         );
@@ -1018,6 +1047,8 @@ export default function TodayClient({
         {/* FAB button */}
         <button
           onClick={() => setFabOpen((v) => !v)}
+          aria-expanded={fabOpen}
+          aria-haspopup="menu"
           className={cn(
             "w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center text-2xl hover:bg-primary/90 active:scale-95 transition-all",
             fabOpen && "rotate-45"
@@ -1077,8 +1108,8 @@ function ProgressRing({ done, total }: { done: number; total: number }) {
   const c = 2 * Math.PI * r;
   const pct = total > 0 ? done / total : 0;
   return (
-    <div className="relative w-[46px] h-[46px]">
-      <svg width="46" height="46" viewBox="0 0 46 46" style={{ transform: "rotate(-90deg)" }}>
+    <div className="relative w-[46px] h-[46px]" role="img" aria-label={`${done} of ${total} items done`}>
+      <svg width="46" height="46" viewBox="0 0 46 46" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
         <circle cx="23" cy="23" r={r} fill="none" stroke="var(--muted)" strokeWidth="3" />
         <circle
           cx="23" cy="23" r={r} fill="none"

@@ -5,6 +5,7 @@ import BottomNav from "@/components/BottomNav";
 import Sidebar from "@/components/Sidebar";
 import MainContent from "@/components/MainContent";
 import { SettingsProvider } from "@/components/SettingsProvider";
+import { Toaster } from "@/components/ui/sonner";
 import { getSettings } from "@/app/actions/settings";
 
 const geist = Geist({
@@ -60,6 +61,7 @@ export default async function RootLayout({
           <Sidebar />
           <MainContent>{children}</MainContent>
           <BottomNav />
+          <Toaster />
         </SettingsProvider>
       </body>
     </html>
