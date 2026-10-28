@@ -323,8 +323,8 @@ export default function TodayScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 10, borderBottomColor: c.border, backgroundColor: c.background }]}>
         <View style={{ flex: 1 }}>
           <Overline>{relativeLabel}</Overline>
-          <Text style={{ fontFamily: "serif", fontSize: 38, color: c.foreground, lineHeight: 42 }}>{format(parsedDate, "EEEE")},</Text>
-          <Text style={{ fontFamily: "serif", fontStyle: "italic", fontSize: 26, color: c.mutedForeground }}>{format(parsedDate, "MMMM d")}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ fontFamily: "serif", fontSize: 38, color: c.foreground, lineHeight: 42 }}>{format(parsedDate, "EEEE")},</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ fontFamily: "serif", fontStyle: "italic", fontSize: 26, color: c.mutedForeground }}>{format(parsedDate, "MMMM d")}</Text>
         </View>
         <View style={{ alignItems: "flex-end", gap: 6 }}>
           <View style={{ flexDirection: "row" }}>

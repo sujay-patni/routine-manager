@@ -116,7 +116,7 @@ export default function CalendarScreen() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <View style={[styles.header, { paddingTop: insets.top + 10, borderBottomColor: c.border }]}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={{ fontFamily: "serif", fontSize: 30, color: c.foreground }}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ flex: 1, fontFamily: "serif", fontSize: 30, color: c.foreground }}>
             {view === "month" ? format(month, "MMMM yyyy") : "Schedule"}
           </Text>
           <View style={{ flexDirection: "row" }}>
