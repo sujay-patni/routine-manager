@@ -4,6 +4,7 @@ import {
   startOfWeek,
   endOfWeek,
   differenceInDays,
+  differenceInCalendarDays,
   parseISO,
   format,
   subDays,
@@ -249,7 +250,8 @@ export function getDeadlineState(
 } {
   const ref = referenceDate ?? toZonedTime(new Date(), timezone);
   const dueDate = parseZonedOrLocal(dueDateStr, timezone);
-  const diff = differenceInDays(dueDate, ref);
+  // Calendar days, so a deadline 2 days away reads "2 days" at any time of day.
+  const diff = differenceInCalendarDays(dueDate, ref);
 
   return {
     show: diff <= surfaceDays,

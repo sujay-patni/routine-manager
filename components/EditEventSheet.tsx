@@ -13,6 +13,8 @@ import { updateEvent, deleteEvent, type TodayEvent } from "@/app/actions/events"
 import type { AppEvent, Group } from "@/lib/domain/types";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import { useIsMobile } from "@/lib/useMediaQuery";
+import { friendlyError } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface EditEventSheetProps {
   event: AppEvent | null;
@@ -162,8 +164,13 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
         dispatchEvent({ action: "update", item: { ...event, ...data, id: event.id } as TodayEvent });
       }
       const result = await updateEvent(event.id, data);
-      if (result.error) console.error("Error updating event:", result.error);
-      else router.refresh();
+      if (result.error) {
+        console.error("Error updating event:", result.error);
+        toast.error("Couldn't save changes", { description: friendlyError(result.error) });
+      } else {
+        toast.success("Saved");
+        router.refresh();
+      }
     });
 
     onOpenChange(false);
@@ -192,8 +199,13 @@ export default function EditEventSheet({ event, open, onOpenChange, dispatchEven
         excludeDateString = event.id.split("_")[1];
       }
       const result = await deleteEvent(event.id, excludeDateString);
-      if (result.error) console.error("Error deleting event:", result.error);
-      else router.refresh();
+      if (result.error) {
+        console.error("Error deleting event:", result.error);
+        toast.error("Couldn't delete", { description: friendlyError(result.error) });
+      } else {
+        toast.success("Deleted");
+        router.refresh();
+      }
     });
 
     setDeleteMode("none");

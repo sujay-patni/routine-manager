@@ -13,7 +13,8 @@ import { updateHabit, deleteHabit } from "@/app/actions/habits";
 import type { Habit, HabitFrequency, Group, HealthSource } from "@/lib/domain/types";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { OptimisticAction } from "@/app/today/TodayClient";
-import { cn } from "@/lib/utils";
+import { cn, friendlyError } from "@/lib/utils";
+import { toast } from "sonner";
 import { useSettings } from "@/components/SettingsProvider";
 import { useIsMobile } from "@/lib/useMediaQuery";
 
@@ -192,8 +193,13 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     startTransition(async () => {
       if (dispatchHabit) dispatchHabit({ action: "delete", item: habit as ProcessedHabit });
       const result = await deleteHabit(habit.id);
-      if (result.error) console.error("Error deleting habit:", result.error);
-      else { onSaved?.(); router.refresh(); }
+      if (result.error) {
+        console.error("Error deleting habit:", result.error);
+        toast.error("Couldn't delete habit", { description: friendlyError(result.error) });
+      } else {
+        toast.success("Habit deleted");
+        onSaved?.(); router.refresh();
+      }
     });
 
     onOpenChange(false);
@@ -203,6 +209,21 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
     e.preventDefault();
     if (!habit) return;
     if (!name.trim()) { setError("Name is required"); return; }
+    if (freq === "specific_days_weekly" && selectedDays.length === 0) {
+      setError("Pick at least one day"); return;
+    }
+    if (freq === "specific_dates_monthly" && selectedDates.length === 0) {
+      setError("Pick at least one date"); return;
+    }
+    if (freq === "specific_dates_yearly" && yearlyDates.some(({ day }) => {
+      const d = Number(day);
+      return isNaN(d) || d < 1 || d > 31;
+    })) {
+      setError("Day must be between 1 and 31"); return;
+    }
+    if (progressOn && (!target || Number(target) <= 0)) {
+      setError("Target is required for progress tracking"); return;
+    }
     setError(null);
 
     const cLeft = Number(convLeft) || 1;
@@ -234,8 +255,13 @@ export default function EditHabitSheet({ habit, open, onOpenChange, dispatchHabi
         dispatchHabit({ action: "update", item: { ...(habit as ProcessedHabit), ...payload } });
       }
       const result = await updateHabit(habit.id, payload);
-      if (result.error) console.error("Error updating habit:", result.error);
-      else { onSaved?.(); router.refresh(); }
+      if (result.error) {
+        console.error("Error updating habit:", result.error);
+        toast.error("Couldn't save changes", { description: friendlyError(result.error) });
+      } else {
+        toast.success("Habit saved");
+        onSaved?.(); router.refresh();
+      }
     });
 
     onOpenChange(false);

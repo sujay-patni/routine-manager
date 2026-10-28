@@ -44,7 +44,7 @@ export default function GroupFilterBar({
             key={pill.id}
             onClick={() => handleClick(pill.id)}
             className={cn(
-              "flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border",
+              "flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all border",
               isActive
                 ? "bg-foreground text-background border-foreground"
                 : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground"

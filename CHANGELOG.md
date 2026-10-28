@@ -2,6 +2,54 @@
 
 All notable changes to Routine Manager are documented here. This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-10-29
+
+### Added
+
+- **Rise, a native Android app** (`mobile/`, Rise 1.0.0). An Expo / React Native version of Routine that stores everything on the phone in SQLite. No server, account, or login. The habit, event, skip, and vacation logic is ported from the web app, and running both apps against the same real data across 50 days gave identical results.
+  - Screens: Today (time sections, completed/skipped lists, This Week grid, Day Log, group filters), Calendar (Day, Week, Month, Year, and Schedule views), Settings, and Habits / Groups / Vacations management. Habit and event detail sheets, plus a Light / Dark / System theme switch.
+  - **Health Connect:** steps, sleep, distance, and active calories are read straight from the phone (no webhook) and synced into habits with a health source on launch, on resume, and on pull-to-refresh.
+  - **Backup & restore:** export everything to a JSON file through the share sheet; restore from a file after a confirmation.
+  - Custom app icon (`mobile/scripts/make-icons.cjs`).
+- `npm run db:export-mobile` writes your Neon data as a Rise backup file for a one-time move to the phone.
+
+### Changed
+
+- **Mobile UX overhaul (web):** Select dropdowns no longer get cut off on phones; failed habit toggles roll back with an error toast instead of silently freezing; toasts for previously silent failures; inline form validation in the Add/Edit sheets; a layout-matched loading skeleton; bigger touch targets; a This Week grid that fits 320px screens; ARIA labels across checkboxes, progress ring, week dots, and accordions.
+- `mobile/` is excluded from the web app's typecheck and ESLint. Exported `routine-backup-*.json` files are git-ignored.
+
+### Fixed
+
+- **Deadline countdown was a day short for most of the day.** "Due in N days" now counts calendar days, so a deadline two days away reads "2 days" at any time.
+- **Today's events respect Day Start Hour** (#20).
+- **Daily steps no longer drop on later syncs** (#21). Takes the larger of the daily aggregate and the bout sum, so a stale aggregate can't lower the total.
+
+### Notes
+
+- Rise and the web app don't sync with each other. After moving to Rise, log in one app only.
+- The Rise APK attached to this release is signed with a development key for personal sideloading, not the Play Store.
+
+---
+
+## [2.0.0] - 2026-05-26
+
+### Breaking
+
+- **Neon/Postgres is now the only data source.** Notion integration code, Notion env vars, and Notion import scripts were removed.
+
+### Added
+
+- Drizzle schema, migrations, a lazy database client, and Postgres repositories for habits, completions, events, settings, groups, skips, vacations, and allowed devices.
+- `db:seed` and `db:verify` scripts for reproducible setup and database health checks.
+- Setup documentation for Neon, local development, Vercel deployment, backups, and smoke testing.
+
+### Upgrade notes
+
+- Set `DATABASE_URL`, then run `npm run db:migrate`, `npm run db:seed`, and `npm run db:verify` against each database.
+- Remove old `NOTION_*` environment variables. Keep `APP_PASSPHRASE`, `COOKIE_SECRET`, and the optional `HEALTH_WEBHOOK_SECRET`.
+
+---
+
 ## [1.4.1] - 2026-05-08
 
 ### Fixed

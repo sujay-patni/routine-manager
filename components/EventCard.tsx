@@ -4,7 +4,8 @@ import { useTransition, useState, useRef } from "react";
 import { setEventCompleted } from "@/app/actions/events";
 import type { TodayEvent } from "@/app/actions/events";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, friendlyError } from "@/lib/utils";
+import { toast } from "sonner";
 import { useSwipeReveal } from "@/lib/useSwipeReveal";
 import type { Group } from "@/lib/domain/types";
 
@@ -76,7 +77,12 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
     setLocalDone(true);
     onDoneChange?.(event.id, true);
     startTransition(async () => {
-      await setEventCompleted(event.id, true, durationActual);
+      const result = await setEventCompleted(event.id, true, durationActual);
+      if (result?.error) {
+        setLocalDone(false);
+        onDoneChange?.(event.id, false);
+        toast.error("Couldn't complete event", { description: friendlyError(result.error) });
+      }
     });
   }
 
@@ -85,7 +91,12 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
       setLocalDone(false);
       onDoneChange?.(event.id, false);
       startTransition(async () => {
-        await setEventCompleted(event.id, false);
+        const result = await setEventCompleted(event.id, false);
+        if (result?.error) {
+          setLocalDone(true);
+          onDoneChange?.(event.id, true);
+          toast.error("Couldn't update event", { description: friendlyError(result.error) });
+        }
       });
       return;
     }
@@ -188,28 +199,35 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
             <button
               onClick={(e) => { e.stopPropagation(); toggleComplete(); }}
               disabled={isPending}
-              className={cn(
-                "mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
-                localDone
-                  ? "bg-emerald-500 border-emerald-500"
-                  : "border-muted-foreground/40 hover:border-primary active:scale-90"
-              )}
+              role="checkbox"
+              aria-checked={localDone}
               aria-label={localDone ? "Mark incomplete" : "Mark complete"}
+              className="mt-0.5 p-2 -m-2 flex-shrink-0"
             >
-              {localDone && (
-                <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
+              <span
+                className={cn(
+                  "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
+                  localDone
+                    ? "bg-emerald-500 border-emerald-500"
+                    : "border-muted-foreground/40 hover:border-primary active:scale-90"
+                )}
+              >
+                {localDone && (
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </span>
             </button>
           )}
           {isSkipped && (
-            <div className="mt-0.5 w-6 h-6 rounded-full border-2 border-muted-foreground/30 flex items-center justify-center flex-shrink-0 text-muted-foreground/60">
+            <div className="mt-0.5 w-6 h-6 rounded-full border-2 border-muted-foreground/30 flex items-center justify-center flex-shrink-0 text-muted-foreground/60" aria-hidden="true">
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 4l10 8-10 8V4zM19 5v14" />
               </svg>
             </div>
           )}
+          {isSkipped && <span className="sr-only">Skipped</span>}
 
           {/* Content */}
           <div className="flex-1 min-w-0">
@@ -222,7 +240,7 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
                 <span className="text-xs text-muted-foreground">↺</span>
               )}
               {defaultDur != null && !localDone && (
-                <span className="text-xs text-muted-foreground/60">~{defaultDur}m</span>
+                <span className="text-xs text-muted-foreground">~{defaultDur}m</span>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">{getSubtitle()}</p>
@@ -241,7 +259,7 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); openLogTime(); }}
-                className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors opacity-0 group-hover:opacity-100"
+                className="w-8 h-8 -my-1 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors opacity-0 group-hover:opacity-100 pointer-coarse:opacity-60"
                 aria-label="Log time"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -253,7 +271,7 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onSkip?.(); }}
-                className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground/70 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
+                className="w-8 h-8 -my-1 flex items-center justify-center rounded-md text-muted-foreground/70 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
                 aria-label="Skip"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -273,7 +291,7 @@ export default function EventCard({ event, groups, onDoneChange, onSkip, onUnski
             {onEdit && (
               <button
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted transition-colors"
+                className="w-8 h-8 -my-1 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted transition-colors"
                 aria-label="Edit"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

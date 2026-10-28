@@ -13,6 +13,7 @@ import { createHabit } from "@/app/actions/habits";
 import { createEvent } from "@/app/actions/events";
 import type { HabitFrequency, Group } from "@/lib/domain/types";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import type { OptimisticAction } from "@/app/today/TodayClient";
 import type { ProcessedHabit } from "@/lib/habit-logic";
 import type { TodayEvent } from "@/app/actions/events";
@@ -90,6 +91,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const isMobile = useIsMobile();
   const settings = useSettings();
 
@@ -166,6 +168,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     setGroupId("");
     setError(null);
     setWarning(null);
+    setFieldErrors({});
   }
 
   function buildRRule(r: string, days?: string[]): string | undefined {
@@ -227,9 +230,38 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
     return undefined;
   }
 
+  function fieldError(key: string) {
+    return fieldErrors[key] ? (
+      <p className="text-xs text-destructive" role="alert">{fieldErrors[key]}</p>
+    ) : null;
+  }
+
+  function validateHabit(): Record<string, string> {
+    const errs: Record<string, string> = {};
+    if (!habitName.trim()) errs.habitName = "Name is required";
+    if (habitFreq === "specific_days_weekly" && habitDays.length === 0) {
+      errs.habitDays = "Pick at least one day";
+    }
+    if (habitFreq === "specific_dates_monthly" && habitDates.length === 0) {
+      errs.habitDates = "Pick at least one date";
+    }
+    if (habitFreq === "specific_dates_yearly" && habitYearlyDates.some(({ day }) => {
+      const d = Number(day);
+      return isNaN(d) || d < 1 || d > 31;
+    })) {
+      errs.habitYearlyDates = "Day must be between 1 and 31";
+    }
+    if (habitProgressOn && (!habitTarget2 || Number(habitTarget2) <= 0)) {
+      errs.habitTarget2 = "Target is required for progress tracking";
+    }
+    return errs;
+  }
+
   function handleHabitSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!habitName.trim()) return;
+    const errs = validateHabit();
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setError(null);
     setWarning(null);
     const convLeft = Number(habitConvLeft) || 1;
@@ -296,12 +328,18 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
 
       resetForms();
       onOpenChange(false);
+      toast.success("Habit added");
     });
   }
 
   function handleTimedEventSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!eventTitle.trim()) return;
+    const errs: Record<string, string> = {};
+    if (!eventTitle.trim()) errs.eventTitle = "Title is required";
+    if (!eventDate) errs.eventDate = "Date is required";
+    if (recurrence === "specific_days" && eventDays.length === 0) errs.eventDays = "Pick at least one day";
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setError(null);
     setWarning(null);
     const startISO = new Date(`${eventDate}T${eventTime}:00`).toISOString();
@@ -335,12 +373,18 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       }
       resetForms();
       onOpenChange(false);
+      toast.success("Event added");
     });
   }
 
   function handleAllDaySubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!eventTitle.trim()) return;
+    const errs: Record<string, string> = {};
+    if (!eventTitle.trim()) errs.eventTitle = "Title is required";
+    if (!dueDate) errs.dueDate = "Date is required";
+    if (recurrence === "specific_days" && eventDays.length === 0) errs.eventDays = "Pick at least one day";
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setError(null);
     setWarning(null);
     const rrule = buildRRule(recurrence, eventDays);
@@ -370,15 +414,20 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       }
       resetForms();
       onOpenChange(false);
+      toast.success("Task added");
     });
   }
 
   function handleDeadlineSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!eventTitle.trim()) return;
+    const errs: Record<string, string> = {};
+    if (!eventTitle.trim()) errs.eventTitle = "Title is required";
+    if (!dueDate) errs.dueDate = "Due date is required";
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setError(null);
     setWarning(null);
-    
+
     const payload = {
       title: eventTitle.trim(),
       description: eventDesc || undefined,
@@ -405,6 +454,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
       }
       resetForms();
       onOpenChange(false);
+      toast.success("Deadline added");
     });
   }
 
@@ -434,7 +484,8 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
               <form onSubmit={handleHabitSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label>Name</Label>
-                  <Input placeholder="e.g. Morning run" value={habitName} onChange={e => setHabitName(e.target.value)} required />
+                  <Input placeholder="e.g. Morning run" value={habitName} onChange={e => setHabitName(e.target.value)} aria-invalid={!!fieldErrors.habitName || undefined} />
+                  {fieldError("habitName")}
                 </div>
 
                 {/* Progress tracking — before frequency */}
@@ -480,7 +531,8 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                             let val = parseInt(e.target.value, 10);
                             if (isNaN(val) || val < 1) val = 1;
                             setHabitTarget2(String(val));
-                          }} placeholder="10000" />
+                          }} placeholder="10000" aria-invalid={!!fieldErrors.habitTarget2 || undefined} />
+                          {fieldError("habitTarget2")}
                         </div>
                         <div className="col-span-1 space-y-1">
                           <Label className="text-xs">Unit</Label>
@@ -589,6 +641,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                         </button>
                       ))}
                     </div>
+                    {fieldError("habitDays")}
                   </div>
                 )}
 
@@ -611,6 +664,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                         </button>
                       ))}
                     </div>
+                    {fieldError("habitDates")}
                   </div>
                 )}
 
@@ -667,6 +721,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                         </div>
                       ))}
                     </div>
+                    {fieldError("habitYearlyDates")}
                   </div>
                 )}
 
@@ -798,6 +853,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                       ))}
                     </div>
                   )}
+                  {fieldError("eventDays")}
                 </div>
 
                 <div className="space-y-2">
@@ -907,6 +963,7 @@ export default function AddItemSheet({ open, onOpenChange, defaultTab = "habit",
                       ))}
                     </div>
                   )}
+                  {fieldError("eventDays")}
                 </div>
 
                 <div className="space-y-2">
