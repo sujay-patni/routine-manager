@@ -2,13 +2,19 @@ import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  addDays,
   addMonths,
+  addWeeks,
+  addYears,
   eachDayOfInterval,
   endOfMonth,
   endOfQuarter,
   endOfWeek,
   format,
+  isSameDay,
   isSameMonth,
+  isSameWeek,
+  isSameYear,
   parseISO,
   startOfMonth,
   startOfWeek,
@@ -23,11 +29,19 @@ import { radius, useColors } from "@/lib/theme";
 import { fmtClock } from "@/lib/format";
 import { AddItemSheet, EditEventSheet } from "@/components/ItemSheets";
 import { Button, Chips, IconButton, Overline, Txt } from "@/components/ui";
+import TimeGrid, { TYPE_COLORS } from "@/components/TimeGrid";
+import YearGrid from "@/components/YearGrid";
 
-type View_ = "month" | "schedule";
+type CalView = "day" | "week" | "month" | "year" | "schedule";
 type Range = "today" | "week" | "month" | "quarter" | "year";
 
-const TYPE_COLORS: Record<AppEvent["event_type"], string> = { timed: "#3b82f6", all_day: "#10b981", deadline: "#f97316" };
+const VIEW_OPTIONS: { value: CalView; label: string }[] = [
+  { value: "day", label: "Day" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
+  { value: "year", label: "Year" },
+  { value: "schedule", label: "Schedule" },
+];
 const TYPE_ICON: Record<AppEvent["event_type"], string> = { timed: "📅", all_day: "📋", deadline: "⏰" };
 
 function eventDate(e: AppEvent, tz: string): string | null {
@@ -54,17 +68,21 @@ export default function CalendarScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const { data } = useLoader(load, []);
-  const [view, setView] = useState<View_>("month");
-  const [month, setMonth] = useState(startOfMonth(new Date()));
+  const [view, setView] = useState<CalView>("month");
+  // The day each view is centred on (like the web app's currentDate).
+  const [anchor, setAnchor] = useState(new Date());
   const [selected, setSelected] = useState(format(new Date(), "yyyy-MM-dd"));
   const [range, setRange] = useState<Range>("quarter");
   const [filters, setFilters] = useState<string[]>([]);
   const [editing, setEditing] = useState<AppEvent | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
+  const [addDate, setAddDate] = useState<string | null>(null);
 
   const tz = data?.settings.timezone ?? "UTC";
   const weekStartsOn = (data?.settings.week_start_day === 0 ? 0 : 1) as 0 | 1;
   const groups = data?.groups ?? [];
+  const today = new Date();
+  const todayStr = format(today, "yyyy-MM-dd");
+  const month = startOfMonth(anchor);
 
   const byDate = useMemo(() => {
     const map = new Map<string, AppEvent[]>();
@@ -77,19 +95,41 @@ export default function CalendarScreen() {
     return map;
   }, [data, filters, tz]);
 
+  function shift(dir: 1 | -1) {
+    const next =
+      view === "day" ? addDays(anchor, dir)
+      : view === "week" ? addWeeks(anchor, dir)
+      : view === "year" ? addYears(anchor, dir)
+      : addMonths(anchor, dir);
+    setAnchor(next);
+    if (view === "day" || view === "week") setSelected(format(next, "yyyy-MM-dd"));
+  }
+
+  const onCurrent =
+    view === "day" ? isSameDay(anchor, today)
+    : view === "week" ? isSameWeek(anchor, today, { weekStartsOn })
+    : view === "month" ? isSameMonth(anchor, today) && selected === todayStr
+    : view === "year" ? isSameYear(anchor, today)
+    : true;
+
+  const title =
+    view === "day" ? format(anchor, "EEE, MMM d")
+    : view === "week" || view === "month" ? format(anchor, "MMMM yyyy")
+    : view === "year" ? format(anchor, "yyyy")
+    : "Schedule";
+
   const gridDays = eachDayOfInterval({
     start: startOfWeek(startOfMonth(month), { weekStartsOn }),
     end: endOfWeek(endOfMonth(month), { weekStartsOn }),
   });
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const weekDays = eachDayOfInterval({ start: startOfWeek(anchor, { weekStartsOn }), end: endOfWeek(anchor, { weekStartsOn }) });
 
   const scheduleEnd = (() => {
-    const t = new Date();
-    if (range === "today") return format(t, "yyyy-MM-dd");
-    if (range === "week") return format(endOfWeek(t, { weekStartsOn }), "yyyy-MM-dd");
-    if (range === "month") return format(endOfMonth(t), "yyyy-MM-dd");
-    if (range === "year") return `${t.getFullYear()}-12-31`;
-    return format(endOfQuarter(t), "yyyy-MM-dd");
+    if (range === "today") return todayStr;
+    if (range === "week") return format(endOfWeek(today, { weekStartsOn }), "yyyy-MM-dd");
+    if (range === "month") return format(endOfMonth(today), "yyyy-MM-dd");
+    if (range === "year") return `${today.getFullYear()}-12-31`;
+    return format(endOfQuarter(today), "yyyy-MM-dd");
   })();
   const scheduleDates = [...byDate.keys()].filter((d) => d >= todayStr && d <= scheduleEnd).sort();
 
@@ -110,129 +150,153 @@ export default function CalendarScreen() {
     );
   }
 
+  const filterChips = groups.length > 0 ? (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16 }}>
+      <Chips
+        multiple
+        options={[...groups.map((g) => ({ value: g.id, label: g.name, color: g.color })), { value: "unassigned", label: "No group" }]}
+        value={filters}
+        onChange={(id) => setFilters((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))}
+      />
+    </ScrollView>
+  ) : null;
+
   const selectedEvents = byDate.get(selected) ?? [];
   const weekdayLabels = gridDays.slice(0, 7).map((d) => format(d, "EEEEE"));
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <View style={[styles.header, { paddingTop: insets.top + 10, borderBottomColor: c.border }]}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 }}>
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ flex: 1, fontFamily: "serif", fontSize: 30, color: c.foreground }}>
-            {view === "month" ? format(month, "MMMM yyyy") : "Schedule"}
+            {title}
           </Text>
           <View style={{ flexDirection: "row" }}>
-            {view === "month" ? (
+            {view !== "schedule" ? (
               <>
-                <IconButton icon="chevron-back" label="Previous month" onPress={() => setMonth((m) => addMonths(m, -1))} />
-                <IconButton icon="chevron-forward" label="Next month" onPress={() => setMonth((m) => addMonths(m, 1))} />
+                <IconButton icon="chevron-back" label={`Previous ${view}`} onPress={() => shift(-1)} />
+                <IconButton icon="chevron-forward" label={`Next ${view}`} onPress={() => shift(1)} />
               </>
             ) : null}
-            <IconButton icon="add-circle" color={c.primary} size={28} label="Add" onPress={() => setAddOpen(true)} />
+            <IconButton icon="add-circle" color={c.primary} size={28} label="Add" onPress={() => setAddDate(view === "day" ? format(anchor, "yyyy-MM-dd") : selected)} />
           </View>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Chips options={[{ value: "month", label: "Month" }, { value: "schedule", label: "Schedule" }]} value={view} onChange={setView} />
-          {view === "month" && (!isSameMonth(month, new Date()) || selected !== todayStr) ? (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 }}>
+          <Chips small options={VIEW_OPTIONS} value={view} onChange={setView} />
+          {!onCurrent ? (
             <Button
               title="Today"
               variant="ghost"
               onPress={() => {
-                setMonth(startOfMonth(new Date()));
+                setAnchor(new Date());
                 setSelected(todayStr);
               }}
-              style={{ paddingVertical: 6, paddingHorizontal: 10 }}
+              style={{ paddingVertical: 6, paddingHorizontal: 8 }}
             />
           ) : null}
         </View>
+        {filterChips}
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }}>
-        {groups.length > 0 ? (
-          <Chips
-            multiple
-            options={[...groups.map((g) => ({ value: g.id, label: g.name, color: g.color })), { value: "unassigned", label: "No group" }]}
-            value={filters}
-            onChange={(id) => setFilters((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))}
-          />
-        ) : null}
-
-        {view === "month" ? (
-          <>
-            <View>
-              <View style={{ flexDirection: "row" }}>
-                {weekdayLabels.map((l, i) => (
-                  <Txt key={i} size={12} muted style={{ flex: 1, textAlign: "center" }}>{l}</Txt>
-                ))}
-              </View>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 6 }}>
-                {gridDays.map((d) => {
-                  const ds = format(d, "yyyy-MM-dd");
-                  const evs = byDate.get(ds) ?? [];
-                  const isSel = ds === selected;
-                  const isToday = ds === todayStr;
-                  return (
-                    <Pressable
-                      key={ds}
-                      onPress={() => setSelected(ds)}
-                      accessibilityLabel={`${format(d, "EEEE MMMM d")}, ${evs.length} items`}
-                      style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 2 }}
-                    >
-                      <View style={[styles.dayCell, { backgroundColor: isSel ? c.primary : isToday ? c.accent : "transparent" }]}>
-                        <Txt
-                          size={14}
-                          weight={isToday ? "700" : "400"}
-                          style={{ color: isSel ? c.primaryForeground : isSameMonth(d, month) ? c.foreground : c.mutedForeground, opacity: isSameMonth(d, month) ? 1 : 0.5 }}
-                        >
-                          {format(d, "d")}
-                        </Txt>
-                        <View style={{ flexDirection: "row", gap: 2, height: 6 }}>
-                          {evs.slice(0, 3).map((e) => (
-                            <View key={e.id} style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isSel ? c.primaryForeground : groups.find((g) => g.id === e.group_id)?.color ?? TYPE_COLORS[e.event_type] }} />
-                          ))}
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-            <View style={{ gap: 8 }}>
-              <Overline>{format(parseISO(selected), "EEEE, MMMM d")}</Overline>
-              {selectedEvents.length === 0 ? <Txt muted>Nothing scheduled.</Txt> : selectedEvents.map((e) => <EventRow key={e.id} e={e} />)}
-            </View>
-          </>
-        ) : (
-          <>
-            <Chips
-              options={[
-                { value: "today", label: "Today" },
-                { value: "week", label: "This week" },
-                { value: "month", label: "This month" },
-                { value: "quarter", label: "This quarter" },
-                { value: "year", label: "This year" },
-              ]}
-              value={range}
-              onChange={setRange}
-            />
-            {scheduleDates.length === 0 ? <Txt muted>Nothing coming up.</Txt> : null}
-            {scheduleDates.map((ds) => (
-              <View key={ds} style={{ gap: 8 }}>
-                <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-                  <Text style={{ fontFamily: "serif", fontSize: 18, color: c.foreground }}>{format(parseISO(ds), "EEEE")}</Text>
-                  <Overline style={{ fontSize: 10 }}>{format(parseISO(ds), "MMMM d")}</Overline>
+      {view === "day" || view === "week" ? (
+        <TimeGrid
+          days={view === "day" ? [anchor] : weekDays}
+          eventsByDate={byDate}
+          groups={groups}
+          timezone={tz}
+          onOpenEvent={setEditing}
+          onAddOnDay={(ds) => setAddDate(ds)}
+        />
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }}>
+          {view === "month" ? (
+            <>
+              <View>
+                <View style={{ flexDirection: "row" }}>
+                  {weekdayLabels.map((l, i) => (
+                    <Txt key={i} size={12} muted style={{ flex: 1, textAlign: "center" }}>{l}</Txt>
+                  ))}
                 </View>
-                {(byDate.get(ds) ?? []).map((e) => <EventRow key={e.id} e={e} />)}
+                <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 6 }}>
+                  {gridDays.map((d) => {
+                    const ds = format(d, "yyyy-MM-dd");
+                    const evs = byDate.get(ds) ?? [];
+                    const isSel = ds === selected;
+                    const isToday = ds === todayStr;
+                    return (
+                      <Pressable
+                        key={ds}
+                        onPress={() => setSelected(ds)}
+                        accessibilityLabel={`${format(d, "EEEE MMMM d")}, ${evs.length} items`}
+                        style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 2 }}
+                      >
+                        <View style={[styles.dayCell, { backgroundColor: isSel ? c.primary : isToday ? c.accent : "transparent" }]}>
+                          <Txt
+                            size={14}
+                            weight={isToday ? "700" : "400"}
+                            style={{ color: isSel ? c.primaryForeground : isSameMonth(d, month) ? c.foreground : c.mutedForeground, opacity: isSameMonth(d, month) ? 1 : 0.5 }}
+                          >
+                            {format(d, "d")}
+                          </Txt>
+                          <View style={{ flexDirection: "row", gap: 2, height: 6 }}>
+                            {evs.slice(0, 3).map((e) => (
+                              <View key={e.id} style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isSel ? c.primaryForeground : groups.find((g) => g.id === e.group_id)?.color ?? TYPE_COLORS[e.event_type] }} />
+                            ))}
+                          </View>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </View>
-            ))}
-          </>
-        )}
-      </ScrollView>
+              <View style={{ gap: 8 }}>
+                <Overline>{format(parseISO(selected), "EEEE, MMMM d")}</Overline>
+                {selectedEvents.length === 0 ? <Txt muted>Nothing scheduled.</Txt> : selectedEvents.map((e) => <EventRow key={e.id} e={e} />)}
+              </View>
+            </>
+          ) : view === "year" ? (
+            <YearGrid
+              year={anchor.getFullYear()}
+              weekStartsOn={weekStartsOn}
+              eventsByDate={byDate}
+              onOpenMonth={(m) => {
+                setAnchor(m);
+                setView("month");
+              }}
+            />
+          ) : (
+            <>
+              <Chips
+                options={[
+                  { value: "today", label: "Today" },
+                  { value: "week", label: "This week" },
+                  { value: "month", label: "This month" },
+                  { value: "quarter", label: "This quarter" },
+                  { value: "year", label: "This year" },
+                ]}
+                value={range}
+                onChange={setRange}
+              />
+              {scheduleDates.length === 0 ? <Txt muted>Nothing coming up.</Txt> : null}
+              {scheduleDates.map((ds) => (
+                <View key={ds} style={{ gap: 8 }}>
+                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                    <Text style={{ fontFamily: "serif", fontSize: 18, color: c.foreground }}>{format(parseISO(ds), "EEEE")}</Text>
+                    <Overline style={{ fontSize: 10 }}>{format(parseISO(ds), "MMMM d")}</Overline>
+                  </View>
+                  {(byDate.get(ds) ?? []).map((e) => <EventRow key={e.id} e={e} />)}
+                </View>
+              ))}
+            </>
+          )}
+        </ScrollView>
+      )}
 
       <AddItemSheet
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
+        open={addDate != null}
+        onClose={() => setAddDate(null)}
         defaultTab="timed"
-        defaultDate={selected}
+        defaultDate={addDate ?? selected}
         groups={groups}
         progressUnits={data?.settings.progress_units ?? ["mins", "hrs"]}
       />
@@ -242,7 +306,7 @@ export default function CalendarScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingHorizontal: 16, paddingBottom: 12, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  header: { paddingBottom: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   dayCell: { flex: 1, borderRadius: radius.md, alignItems: "center", justifyContent: "center", gap: 3 },
   eventRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
 });

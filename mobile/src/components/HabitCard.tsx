@@ -33,9 +33,10 @@ interface Props {
   onSkip?: () => void;
   onUnskip?: () => void;
   onEdit?: () => void;
+  onView?: () => void;
 }
 
-export default function HabitCard({ habit, today, groups, onSkip, onUnskip, onEdit }: Props) {
+export default function HabitCard({ habit, today, groups, onSkip, onUnskip, onEdit, onView }: Props) {
   const c = useColors();
   const [localDone, setLocalDone] = useState(habit.completed_today > 0);
   const [localProgress, setLocalProgress] = useState(habit.today_progress ?? 0);
@@ -129,7 +130,7 @@ export default function HabitCard({ habit, today, groups, onSkip, onUnskip, onEd
 
   return (
     <Pressable
-      onPress={editor === "none" ? onEdit : undefined}
+      onPress={editor === "none" ? onView ?? onEdit : undefined}
       onLongPress={canLogTime ? openLogTime : undefined}
       accessibilityHint={canLogTime ? "Long press to log time" : undefined}
       style={({ pressed }) => [
@@ -177,6 +178,7 @@ export default function HabitCard({ habit, today, groups, onSkip, onUnskip, onEd
         </View>
 
         {!done && !isSkipped && onSkip ? <IconButton icon="play-skip-forward-outline" size={17} onPress={onSkip} label="Skip habit" /> : null}
+        {onView && onEdit ? <IconButton icon="create-outline" size={17} onPress={onEdit} label="Edit habit" /> : null}
         {isSkipped && onUnskip ? <Button title="Undo" variant="ghost" onPress={onUnskip} style={{ paddingVertical: 4, paddingHorizontal: 8 }} /> : null}
         {hasProgress && !isProgressDone && !isSkipped ? (
           <IconButton icon="add-circle-outline" size={24} color={c.primary} onPress={openProgress} label="Log progress" />

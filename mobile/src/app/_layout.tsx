@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { migrateDb } from "@/lib/db/client";
 import { syncHealth } from "@/lib/health/sync";
+import { loadThemePref } from "@/lib/theme-pref";
 import { useColors } from "@/lib/theme";
 import { Txt } from "@/components/ui";
 
@@ -15,6 +16,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     migrateDb()
+      .then(loadThemePref)
       .then(() => setReady(true))
       .catch((e) => setError(String(e)));
   }, []);

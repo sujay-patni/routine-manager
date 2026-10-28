@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, type Href } from "expo-router";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/services/settings";
 import { useLoader } from "@/lib/useLoader";
+import { setThemePref, useThemePref } from "@/lib/theme-pref";
 import { radius, useColors } from "@/lib/theme";
 import { toast, toastError } from "@/lib/format";
 import { Button, Card, Chips, Field, IconButton, Input, Overline, Select, Txt, type IconName } from "@/components/ui";
@@ -52,6 +53,7 @@ function SettingsForm({ settings }: { settings: AppSettings }) {
   const [units, setUnits] = useState<string[]>(settings.progress_units);
   const [newUnit, setNewUnit] = useState("");
   const [saving, setSaving] = useState(false);
+  const themePref = useThemePref();
 
   const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const tzOptions = Array.from(new Set([timezone, deviceTz, ...COMMON_TIMEZONES].filter(Boolean))).map((tz) => ({
@@ -99,6 +101,14 @@ function SettingsForm({ settings }: { settings: AppSettings }) {
           <Field label="Timezone">
             <Select value={timezone} title="Timezone" options={tzOptions} onChange={setTimezone} />
           </Field>
+          <View style={styles.row}>
+            <Txt size={13} weight="600">Theme</Txt>
+            <Chips
+              options={[{ value: "light", label: "Light" }, { value: "dark", label: "Dark" }, { value: "system", label: "System" }]}
+              value={themePref}
+              onChange={(t) => setThemePref(t)}
+            />
+          </View>
           <View style={styles.row}>
             <Txt size={13} weight="600">Week starts on</Txt>
             <Chips options={[{ value: "1", label: "Monday" }, { value: "0", label: "Sunday" }]} value={weekStart} onChange={setWeekStart} />

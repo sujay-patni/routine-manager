@@ -46,9 +46,10 @@ interface Props {
   onSkip?: () => void;
   onUnskip?: () => void;
   onEdit?: () => void;
+  onView?: () => void;
 }
 
-export default function EventCard({ event, groups, onSkip, onUnskip, onEdit }: Props) {
+export default function EventCard({ event, groups, onSkip, onUnskip, onEdit, onView }: Props) {
   const c = useColors();
   const [done, setDone] = useState(event.is_completed);
   const [logOpen, setLogOpen] = useState(false);
@@ -87,7 +88,7 @@ export default function EventCard({ event, groups, onSkip, onUnskip, onEdit }: P
 
   return (
     <Pressable
-      onPress={logOpen ? undefined : onEdit}
+      onPress={logOpen ? undefined : onView ?? onEdit}
       onLongPress={!done && !isSkipped ? openLogTime : undefined}
       accessibilityHint={!done && !isSkipped ? "Long press to log time" : undefined}
       style={({ pressed }) => [
@@ -131,6 +132,7 @@ export default function EventCard({ event, groups, onSkip, onUnskip, onEdit }: P
           </Txt>
         </View>
         {!done && !isSkipped && onSkip ? <IconButton icon="play-skip-forward-outline" size={17} onPress={onSkip} label="Skip" /> : null}
+        {onView && onEdit ? <IconButton icon="create-outline" size={17} onPress={onEdit} label="Edit" /> : null}
         {isSkipped && onUnskip ? <Button title="Undo" variant="ghost" onPress={onUnskip} style={{ paddingVertical: 4, paddingHorizontal: 8 }} /> : null}
       </View>
 

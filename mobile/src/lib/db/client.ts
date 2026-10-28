@@ -18,7 +18,7 @@ export function getDb() {
 }
 
 // Bump DATABASE_VERSION and add a step below whenever the schema changes.
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 
 export async function migrateDb(): Promise<void> {
   const conn = getSqlite();
@@ -137,6 +137,11 @@ export async function migrateDb(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS vacations_start_end_idx ON vacations (start_date, end_date);
     `);
+  }
+
+  if (current < 2) {
+    // Device-only preferences (like the theme). Not part of backups.
+    await conn.execAsync(`CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);`);
   }
 
   await conn.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);

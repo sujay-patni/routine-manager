@@ -17,6 +17,7 @@ import { fmtMins, toastError } from "@/lib/format";
 import HabitCard from "@/components/HabitCard";
 import EventCard from "@/components/EventCard";
 import { AddItemSheet, EditEventSheet, EditHabitSheet, type AddTab } from "@/components/ItemSheets";
+import { EventDetailSheet, HabitDetailSheet } from "@/components/DetailSheets";
 import { Accordion, Banner, Chips, EmptyState, IconButton, Overline, ProgressBar, Sheet, Txt, openDatePicker } from "@/components/ui";
 
 type TimeKey = "morning" | "afternoon" | "evening" | "night";
@@ -102,6 +103,8 @@ export default function TodayScreen() {
   const [addTab, setAddTab] = useState<AddTab | null>(null);
   const [editHabit, setEditHabit] = useState<ProcessedHabit | null>(null);
   const [editEvent, setEditEvent] = useState<TodayEvent | null>(null);
+  const [viewHabit, setViewHabit] = useState<ProcessedHabit | null>(null);
+  const [viewEvent, setViewEvent] = useState<TodayEvent | null>(null);
   const [dayLog, setDayLog] = useState<DayLogResult | null>(null);
   const [dayLogOpen, setDayLogOpen] = useState(false);
 
@@ -260,6 +263,7 @@ export default function TodayScreen() {
           onSkip={() => handleHabitSkip(entry.item)}
           onUnskip={() => handleHabitUnskip(entry.item)}
           onEdit={() => setEditHabit(entry.item)}
+          onView={() => setViewHabit(entry.item)}
         />
       ) : (
         <EventCard
@@ -269,6 +273,7 @@ export default function TodayScreen() {
           onSkip={() => handleEventSkip(entry.item)}
           onUnskip={() => handleEventUnskip(entry.item)}
           onEdit={() => setEditEvent(entry.item)}
+          onView={() => setViewEvent(entry.item)}
         />
       )
     );
@@ -380,7 +385,7 @@ export default function TodayScreen() {
                     <SectionHeader left="Weekly goals met" faded />
                     <View style={{ gap: 8 }}>
                       {satisfiedHabits.map((h) => (
-                        <HabitCard key={h.id} habit={h} today={dateStr} groups={groups} onSkip={() => handleHabitSkip(h)} onUnskip={() => handleHabitUnskip(h)} onEdit={() => setEditHabit(h)} />
+                        <HabitCard key={h.id} habit={h} today={dateStr} groups={groups} onSkip={() => handleHabitSkip(h)} onUnskip={() => handleHabitUnskip(h)} onEdit={() => setEditHabit(h)} onView={() => setViewHabit(h)} />
                       ))}
                     </View>
                   </View>
@@ -488,6 +493,25 @@ export default function TodayScreen() {
       />
       <EditHabitSheet habit={editHabit} onClose={() => setEditHabit(null)} groups={groups} progressUnits={data?.settings.progress_units ?? ["mins", "hrs"]} />
       <EditEventSheet event={editEvent} onClose={() => setEditEvent(null)} groups={groups} />
+      <HabitDetailSheet
+        habit={viewHabit}
+        groups={groups}
+        onClose={() => setViewHabit(null)}
+        onEdit={(h) => {
+          // Let the detail sheet finish closing before the edit sheet opens.
+          setViewHabit(null);
+          setTimeout(() => setEditHabit(h as ProcessedHabit), 250);
+        }}
+      />
+      <EventDetailSheet
+        event={viewEvent}
+        groups={groups}
+        onClose={() => setViewEvent(null)}
+        onEdit={(e) => {
+          setViewEvent(null);
+          setTimeout(() => setEditEvent(e as TodayEvent), 250);
+        }}
+      />
 
       <Sheet open={dayLogOpen} onClose={() => setDayLogOpen(false)} title={`Day log · ${format(parsedDate, "MMM d")}`}>
         {!dayLog ? (

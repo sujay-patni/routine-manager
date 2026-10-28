@@ -57,9 +57,8 @@ npm run lint
 npx expo-doctor
 ```
 
-## Not ported yet
+## Differences from the web app
 
-- Calendar **Day / Week / Year** timeline views (Month and Schedule are in).
-- Read-only habit/event **detail sheets**. Tapping a card opens the edit sheet instead.
-- Manual **light/dark theme** switch (follows the phone setting).
-- Swipe-to-reveal on cards. Long-press a card to log time instead.
+- Logging time: long-press a card (the web app uses a swipe).
+- Theme adds a **System** option that follows the phone; the choice is saved on the phone only and isn't part of backups.
+- Steps come from Health Connect's de-duplicated total, so recent days can differ slightly from what the webhook recorded.
