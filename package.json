@@ -28,7 +28,8 @@
     "db:generate": "node scripts/run-with-required-node.mjs node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node scripts/run-with-required-node.mjs node_modules/drizzle-kit/bin.cjs migrate",
     "db:seed": "node scripts/run-with-required-node.mjs node_modules/tsx/dist/cli.mjs scripts/db-seed.ts",
-    "db:verify": "node scripts/run-with-required-node.mjs node_modules/tsx/dist/cli.mjs scripts/db-verify.ts"
+    "db:verify": "node scripts/run-with-required-node.mjs node_modules/tsx/dist/cli.mjs scripts/db-verify.ts",
+    "db:export-mobile": "node scripts/run-with-required-node.mjs node_modules/tsx/dist/cli.mjs scripts/export-for-mobile.ts"
   },
   "engines": {
     "node": ">=20.9.0"

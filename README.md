@@ -10,6 +10,9 @@ It is built for one person, works well on mobile, installs as a PWA, and uses a 
 ![PWA](https://img.shields.io/badge/PWA-ready-5a0fc8)
 [![CI](https://github.com/sujay-patni/routine-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/sujay-patni/routine-manager/actions/workflows/ci.yml)
 
+> **Android app (Rise):** a native version that keeps all data on the phone lives in [`mobile/`](mobile/README.md).
+> Move your data over with `npm run db:export-mobile`.
+
 ## What You Can Do
 
 - See a focused Today view of habits, timed events, all-day tasks, and deadlines.

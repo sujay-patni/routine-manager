@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     // Generated service worker files:
     "public/sw.js",
     "public/workbox-*.js",
+    // Android app has its own tooling:
+    "mobile/**",
   ]),
 ]);
 
