@@ -22,10 +22,10 @@ import { useLoader } from "@/lib/useLoader";
 import { radius, useColors } from "@/lib/theme";
 import { fmtClock } from "@/lib/format";
 import { AddItemSheet, EditEventSheet } from "@/components/ItemSheets";
-import { Chips, IconButton, Overline, Txt } from "@/components/ui";
+import { Button, Chips, IconButton, Overline, Txt } from "@/components/ui";
 
 type View_ = "month" | "schedule";
-type Range = "week" | "month" | "quarter" | "year";
+type Range = "today" | "week" | "month" | "quarter" | "year";
 
 const TYPE_COLORS: Record<AppEvent["event_type"], string> = { timed: "#3b82f6", all_day: "#10b981", deadline: "#f97316" };
 const TYPE_ICON: Record<AppEvent["event_type"], string> = { timed: "📅", all_day: "📋", deadline: "⏰" };
@@ -85,6 +85,7 @@ export default function CalendarScreen() {
 
   const scheduleEnd = (() => {
     const t = new Date();
+    if (range === "today") return format(t, "yyyy-MM-dd");
     if (range === "week") return format(endOfWeek(t, { weekStartsOn }), "yyyy-MM-dd");
     if (range === "month") return format(endOfMonth(t), "yyyy-MM-dd");
     if (range === "year") return `${t.getFullYear()}-12-31`;
@@ -129,7 +130,20 @@ export default function CalendarScreen() {
             <IconButton icon="add-circle" color={c.primary} size={28} label="Add" onPress={() => setAddOpen(true)} />
           </View>
         </View>
-        <Chips options={[{ value: "month", label: "Month" }, { value: "schedule", label: "Schedule" }]} value={view} onChange={setView} />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Chips options={[{ value: "month", label: "Month" }, { value: "schedule", label: "Schedule" }]} value={view} onChange={setView} />
+          {view === "month" && (!isSameMonth(month, new Date()) || selected !== todayStr) ? (
+            <Button
+              title="Today"
+              variant="ghost"
+              onPress={() => {
+                setMonth(startOfMonth(new Date()));
+                setSelected(todayStr);
+              }}
+              style={{ paddingVertical: 6, paddingHorizontal: 10 }}
+            />
+          ) : null}
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }}>
@@ -191,6 +205,7 @@ export default function CalendarScreen() {
           <>
             <Chips
               options={[
+                { value: "today", label: "Today" },
                 { value: "week", label: "This week" },
                 { value: "month", label: "This month" },
                 { value: "quarter", label: "This quarter" },

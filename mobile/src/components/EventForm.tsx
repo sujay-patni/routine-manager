@@ -5,7 +5,7 @@ import { getEvent } from "@/lib/db/events";
 import type { AppEvent, Group } from "@/lib/types";
 import { localDateStr, localTimeStr, toast, toastError } from "@/lib/format";
 import { Button, Chips, DateField, Field, Input, NumberInput, Select, TimeField } from "./ui";
-import { DAYS_OF_WEEK, TimingField, groupOptions } from "./HabitForm";
+import { DAYS_OF_WEEK, TIME_OF_DAY_OPTIONS, groupOptions } from "./HabitForm";
 
 export type EventKind = AppEvent["event_type"];
 
@@ -84,7 +84,6 @@ export default function EventForm({ kind, event, groups, defaultDate, onDone }: 
       : null);
   const [duration, setDuration] = useState(initialDuration && initialDuration > 0 ? String(initialDuration) : "");
   const [dueTime, setDueTime] = useState(event?.due_time ?? "");
-  const [useExact, setUseExact] = useState(!!event?.due_time);
   const [timeOfDay, setTimeOfDay] = useState<string>(event?.time_of_day ?? "");
   const [surfaceDays, setSurfaceDays] = useState(String(event?.surface_days ?? 3));
   const [recurrence, setRecurrence] = useState("none");
@@ -128,8 +127,8 @@ export default function EventForm({ kind, event, groups, defaultDate, onDone }: 
         data.end_time = mins ? addMinutes(start, mins) : null;
       } else if (kind === "all_day") {
         if (!isInstance) data.due_date = date;
-        data.time_of_day = useExact ? null : timeOfDay || null;
-        data.due_time = useExact ? dueTime || null : null;
+        data.time_of_day = timeOfDay || null;
+        data.due_time = dueTime || null;
       } else {
         data.due_date = date;
         data.due_time = dueTime || null;
@@ -159,8 +158,8 @@ export default function EventForm({ kind, event, groups, defaultDate, onDone }: 
           ...common,
           event_type: "all_day",
           due_date: date,
-          time_of_day: useExact ? undefined : timeOfDay || undefined,
-          due_time: useExact ? dueTime || undefined : undefined,
+          time_of_day: timeOfDay || undefined,
+          due_time: dueTime || undefined,
           is_recurring: !!rrule,
           recurrence_rule: rrule,
         });
@@ -229,7 +228,13 @@ export default function EventForm({ kind, event, groups, defaultDate, onDone }: 
       ) : null}
 
       {kind === "all_day" ? (
-        <TimingField useExact={useExact} setUseExact={setUseExact} timeOfDay={timeOfDay} setTimeOfDay={setTimeOfDay} exactTime={dueTime} setExactTime={setDueTime} />
+        // Same as the web app: a task can have a time of day, an exact time, or both.
+        <Field label="Timing" hint="(optional)">
+          <View style={{ gap: 8 }}>
+            <Select value={timeOfDay} title="Time of day" options={TIME_OF_DAY_OPTIONS} onChange={setTimeOfDay} />
+            <TimeField value={dueTime} onChange={setDueTime} placeholder="Or an exact time" clearable />
+          </View>
+        </Field>
       ) : null}
 
       {kind === "deadline" ? (
